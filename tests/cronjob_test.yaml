@@ -1,0 +1,16 @@
+suite: cronjob
+templates:
+  - cronjob.yaml
+release:
+  name: testrel
+tests:
+  - it: renders CronJob when enabled
+    asserts:
+      - isKind:
+          of: CronJob
+      - equal:
+          path: metadata.namespace
+          value: openshift-config
+      - matchRegex:
+          path: spec.jobTemplate.spec.template.spec.containers[0].image
+          pattern: "^quay.io/validatedpatterns/imperative-container:"

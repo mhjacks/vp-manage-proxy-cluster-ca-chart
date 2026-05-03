@@ -1,0 +1,53 @@
+{{- if and .Values.policy.enabled (not .Values.policy.placementRef.name) }}
+{{- fail "policy.enabled requires policy.placementRef.name (namespace defaults to policy.hubNamespace)" }}
+{{- end }}
+{{- if .Values.policy.enabled }}
+{{- $policyName := .Values.policy.name | default (printf "%s-proxy-trusted-ca" (include "vpProxyCa.fullname" .)) }}
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: {{ $policyName }}
+  namespace: {{ .Values.policy.hubNamespace }}
+  labels:
+    app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: {{ $policyName }}
+        spec:
+          remediationAction: enforce
+          severity: high
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: config.openshift.io/v1
+                kind: Proxy
+                metadata:
+                  name: cluster
+                spec:
+                  trustedCA:
+                    name: {{ .Values.configMapName | quote }}
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: {{ $policyName }}-binding
+  namespace: {{ .Values.policy.hubNamespace }}
+  labels:
+    app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+placementRef:
+  name: {{ .Values.policy.placementRef.name }}
+  kind: Placement
+  apiGroup: cluster.open-cluster-management.io
+subjects:
+  - name: {{ $policyName }}
+    kind: Policy
+    apiGroup: policy.open-cluster-management.io
+{{- end }}

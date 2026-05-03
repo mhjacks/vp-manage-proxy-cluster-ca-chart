@@ -1,6 +1,19 @@
 apiVersion: v2
-description: A Helm chart to serve as the Validated Patterns Template
+name: vp-manage-proxy-cluster-ca
+description: >-
+  Hub-side chart for OpenShift with ACM. Aggregates trusted CA PEMs from the hub
+  and managed clusters (default: spoke push + hub ingress), de-duplicates them,
+  materializes a cluster-wide ConfigMap for Proxy trustedCA, and applies the same
+  bundle to spokes via ManifestWork. ACM Policy + PlacementBinding are enabled by
+  default to enforce Proxy trustedCA on the Placement's clusters; override
+  policy.placementRef to an existing Placement or disable policy.enabled until one
+  exists.
+type: application
+version: 0.1.0
 keywords:
-  - pattern
-name: vp-template
-version: 0.0.1
+  - openshift
+  - acm
+  - proxy
+  - tls
+  - validated-patterns
+  - policy

@@ -1,0 +1,449 @@
+#!/bin/bash
+# Aggregates trust material on the hub, de-duplicates PEM certs, applies a
+# ConfigMap + cluster Proxy trustedCA on the hub, then on each ManagedCluster.
+#
+# Managed cluster CA sources:
+# - acm: ManagedCluster.spec.managedClusterClientConfigs[].caBundle (hub API only).
+# - spokeTrustedCaBundle: openshift-config-managed/trusted-ca-bundle via import kubeconfig.
+# - spokePush: ManifestWork deploys a CronJob on each spoke that pushes trusted-ca-bundle
+#   into ConfigMaps in SPOKE_PUSH_HUB_NAMESPACE (bundle-<cluster>); hub job reads them.
+#
+# Spoke rollout: ManifestWork (default) or kubeconfig.
+# spokePush: spokes receive only token + server + CA in a Secret (no kubeconfig file);
+# hub calls use oc --server --token --certificate-authority.
+set -euo pipefail
+shopt -s nullglob
+
+WORK_DIR="${WORK_DIR:-/tmp/vp-proxy-ca-work}"
+mkdir -p "$WORK_DIR"
+RAW_DIR="$WORK_DIR/raw"
+PEM_DIR="$WORK_DIR/pem"
+UNIQ_DIR="$WORK_DIR/uniq"
+
+CONFIG_MAP_NAME="${CONFIG_MAP_NAME:?}"
+TARGET_NAMESPACE="${TARGET_NAMESPACE:-openshift-config}"
+MANAGED_CLUSTER_LABEL_SELECTOR="${MANAGED_CLUSTER_LABEL_SELECTOR:-}"
+EXCLUDE_CLUSTERS="${EXCLUDE_CLUSTERS:-}"
+INCLUDE_INGRESS_CA="${INCLUDE_INGRESS_CA:-false}"
+ADDITIONAL_CA_FILE="${ADDITIONAL_CA_FILE:-}"
+WAIT_FOR_AVAILABLE="${WAIT_FOR_AVAILABLE:-true}"
+CLUSTER_READINESS_MAX_ATTEMPTS="${CLUSTER_READINESS_MAX_ATTEMPTS:-150}"
+CLUSTER_READINESS_SLEEP_SECONDS="${CLUSTER_READINESS_SLEEP_SECONDS:-30}"
+
+# acm | spokeTrustedCaBundle | spokePush
+MANAGED_CLUSTER_CA_SOURCE="${MANAGED_CLUSTER_CA_SOURCE:-acm}"
+DISTRIBUTE_TO_SPOKES="${DISTRIBUTE_TO_SPOKES:-manifestwork}"
+MANIFEST_WORK_NAME="${MANIFEST_WORK_NAME:?}"
+MANIFEST_WORK_PROXY_NAME="${MANIFEST_WORK_PROXY_NAME:?}"
+MANIFESTWORK_PATCH_CLUSTER_PROXY="${MANIFESTWORK_PATCH_CLUSTER_PROXY:-true}"
+
+SPOKE_PUSH_HUB_NAMESPACE="${SPOKE_PUSH_HUB_NAMESPACE:-vp-proxy-ca-bundles}"
+SPOKE_PUSH_SPOKE_NAMESPACE="${SPOKE_PUSH_SPOKE_NAMESPACE:-vp-proxy-ca-sync}"
+MANIFEST_WORK_PUSH_AGENT_NAME="${MANIFEST_WORK_PUSH_AGENT_NAME:-}"
+SPOKE_PUSH_CRON_SCHEDULE="${SPOKE_PUSH_CRON_SCHEDULE:-15 */6 * * *}"
+SPOKE_PUSH_TOKEN_DURATION="${SPOKE_PUSH_TOKEN_DURATION:-720h}"
+SPOKE_PUSH_HUB_API_SERVER="${SPOKE_PUSH_HUB_API_SERVER:-}"
+PUSH_AGENT_IMAGE="${PUSH_AGENT_IMAGE:?}"
+
+log() { echo "[vp-proxy-ca] $*"; }
+
+VP_SPOKE_PUSH_INCLUDE_DIR="${VP_SPOKE_PUSH_INCLUDE_DIR:-/includes/spoke-push}"
+if [[ "$MANAGED_CLUSTER_CA_SOURCE" == "spokePush" ]]; then
+  if [[ ! -f "${VP_SPOKE_PUSH_INCLUDE_DIR}/build-manifestwork.sh" ]]; then
+    log "FATAL: spokePush requires include scripts at ${VP_SPOKE_PUSH_INCLUDE_DIR}/build-manifestwork.sh (ConfigMap volume)"
+    exit 1
+  fi
+  # shellcheck source=/dev/null
+  source "${VP_SPOKE_PUSH_INCLUDE_DIR}/build-manifestwork.sh"
+fi
+
+is_excluded() {
+  local c="$1"
+  local x
+  for x in $EXCLUDE_CLUSTERS; do
+    if [[ "$c" == "$x" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+wait_managed_cluster_available() {
+  local cluster="$1"
+  local attempt=0
+  local status=""
+  while [[ $attempt -lt "$CLUSTER_READINESS_MAX_ATTEMPTS" ]]; do
+    status="$(oc get managedcluster "$cluster" -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' 2>/dev/null || true)"
+    if [[ "$status" == "True" ]]; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    log "waiting for ManagedCluster $cluster Available=True (${attempt}/${CLUSTER_READINESS_MAX_ATTEMPTS})"
+    sleep "$CLUSTER_READINESS_SLEEP_SECONDS"
+  done
+  log "timeout: ManagedCluster $cluster never became Available"
+  return 1
+}
+
+write_spoke_kubeconfig() {
+  local cluster="$1"
+  local out="/tmp/${cluster}-kubeconfig.yaml"
+  rm -f "$out"
+  local secret_name=""
+  secret_name="$(oc get secrets -n "$cluster" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -E 'admin-kubeconfig$' | head -1 || true)"
+  if [[ -z "$secret_name" ]]; then
+    secret_name="$(oc get secrets -n "$cluster" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -E 'kubeconfig$' | head -1 || true)"
+  fi
+  if [[ -z "$secret_name" ]]; then
+    log "no kubeconfig-like secret in namespace ${cluster}"
+    return 1
+  fi
+  if oc get secret "$secret_name" -n "$cluster" -o jsonpath='{.data.kubeconfig}' 2>/dev/null | base64 -d >"$out" && [[ -s "$out" ]]; then
+    chmod 0600 "$out"
+    echo "$out"
+    return 0
+  fi
+  rm -f "$out"
+  if oc get secret "$secret_name" -n "$cluster" -o jsonpath='{.data.raw-kubeconfig}' 2>/dev/null | base64 -d >"$out" && [[ -s "$out" ]]; then
+    chmod 0600 "$out"
+    echo "$out"
+    return 0
+  fi
+  rm -f "$out"
+  log "secret ${cluster}/${secret_name} has no kubeconfig or raw-kubeconfig data"
+  return 1
+}
+
+extract_acm_client_ca_bundles() {
+  local cluster="$1"
+  local dest="$2"
+  : >"$dest"
+  local line
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    printf '%s' "$line" | base64 -d >>"$dest" 2>/dev/null && printf '\n' >>"$dest" || true
+  done < <(oc get managedcluster "$cluster" -o jsonpath='{range .spec.managedClusterClientConfigs[*]}{.caBundle}{"\n"}{end}' 2>/dev/null || true)
+  if [[ ! -s "$dest" ]]; then
+    log "no usable spec.managedClusterClientConfigs caBundle for ${cluster}"
+    return 1
+  fi
+  log "ACM client caBundle(s) from ${cluster} ($(wc -c <"$dest") bytes)"
+  return 0
+}
+
+extract_trusted_ca_bundle() {
+  local label="$1"
+  local dest="$2"
+  local kc="${3:-}"
+  local args=()
+  if [[ -n "$kc" ]]; then
+    args=(--kubeconfig "$kc")
+  fi
+  if oc "${args[@]}" get configmap trusted-ca-bundle -n openshift-config-managed \
+    -o jsonpath='{.data.ca-bundle\.crt}' >"$dest" 2>/dev/null && [[ -s "$dest" ]]; then
+    log "trusted-ca-bundle from ${label} ($(wc -c <"$dest") bytes)"
+    return 0
+  fi
+  log "failed trusted-ca-bundle from ${label}"
+  return 1
+}
+
+extract_ingress_ca() {
+  local label="$1"
+  local dest="$2"
+  local kc="${3:-}"
+  local args=()
+  if [[ -n "$kc" ]]; then
+    args=(--kubeconfig "$kc")
+  fi
+  if oc "${args[@]}" get secret router-ca -n openshift-ingress-operator \
+    -o jsonpath='{.data.tls\.crt}' 2>/dev/null | base64 -d >"$dest" && [[ -s "$dest" ]]; then
+    log "ingress tls.crt from ${label}"
+    return 0
+  fi
+  if oc "${args[@]}" get secret router-ca -n openshift-ingress-operator \
+    -o jsonpath='{.data.ca\.crt}' 2>/dev/null | base64 -d >"$dest" && [[ -s "$dest" ]]; then
+    log "ingress ca.crt from ${label}"
+    return 0
+  fi
+  return 1
+}
+
+gather_pushed_bundle_from_hub() {
+  local cluster="$1"
+  local dest="$2"
+  if oc get configmap "bundle-${cluster}" -n "$SPOKE_PUSH_HUB_NAMESPACE" \
+    -o jsonpath='{.data.ca-bundle\.crt}' >"$dest" 2>/dev/null && [[ -s "$dest" ]]; then
+    log "pushed bundle from hub ns ${SPOKE_PUSH_HUB_NAMESPACE}/bundle-${cluster} ($(wc -c <"$dest") bytes)"
+    return 0
+  fi
+  log "no bundle ConfigMap yet for ${cluster} in ${SPOKE_PUSH_HUB_NAMESPACE}"
+  return 1
+}
+
+split_pem_file_to_dir() {
+  local file="$1"
+  local outdir="$2"
+  mkdir -p "$outdir"
+  local idx=0
+  local dest=""
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "-----BEGIN CERTIFICATE-----" ]]; then
+      idx=$((idx + 1))
+      dest="${outdir}/part-$(printf '%05d' "$idx").pem"
+      : >"$dest"
+    fi
+    if [[ -n "${dest:-}" ]]; then
+      printf '%s\n' "$line" >>"$dest"
+    fi
+    if [[ "$line" == "-----END CERTIFICATE-----" ]]; then
+      dest=""
+    fi
+  done <"$file"
+}
+
+fingerprint_cert_file() {
+  local f="$1"
+  openssl x509 -in "$f" -noout -fingerprint -sha256 2>/dev/null | sed 's/^SHA256 Fingerprint=//' | tr -d ':'
+}
+
+dedupe_pem_collection() {
+  local src_dir="$1"
+  local final_out="$2"
+  mkdir -p "$UNIQ_DIR"
+  rm -f "$UNIQ_DIR"/*.pem 2>/dev/null || true
+  declare -A FP_SEEN
+  local f fp
+  : >"$final_out"
+  for f in "$src_dir"/*.pem; do
+    [[ -e "$f" ]] || continue
+    fp="$(fingerprint_cert_file "$f" || true)"
+    if [[ -z "$fp" ]]; then
+      continue
+    fi
+    if [[ -n "${FP_SEEN[$fp]:-}" ]]; then
+      continue
+    fi
+    FP_SEEN[$fp]=1
+    cat "$f" >>"$final_out"
+    printf '\n' >>"$final_out"
+  done
+}
+
+apply_ca_configmap() {
+  local label="$1"
+  local bundle="$2"
+  local kc="${3:-}"
+  local args=()
+  if [[ -n "$kc" ]]; then
+    args=(--kubeconfig "$kc")
+  fi
+  oc "${args[@]}" create configmap "$CONFIG_MAP_NAME" -n "$TARGET_NAMESPACE" \
+    --from-file=ca-bundle.crt="$bundle" \
+    --dry-run=client -o yaml | oc "${args[@]}" apply -f -
+  log "ConfigMap ${TARGET_NAMESPACE}/${CONFIG_MAP_NAME} applied on ${label}"
+}
+
+patch_proxy_trusted_ca() {
+  local label="$1"
+  local kc="${2:-}"
+  local args=()
+  if [[ -n "$kc" ]]; then
+    args=(--kubeconfig "$kc")
+  fi
+  oc "${args[@]}" patch proxy cluster --type=merge \
+    -p "{\"spec\":{\"trustedCA\":{\"name\":\"${CONFIG_MAP_NAME}\"}}}" || {
+    log "warning: proxy patch failed on ${label}"
+    return 0
+  }
+  log "Proxy trustedCA set on ${label}"
+}
+
+bundle_to_single_line_b64() {
+  local bundle="$1"
+  local out="$2"
+  if openssl base64 -A -in "$bundle" -out "$out" 2>/dev/null; then
+    return 0
+  fi
+  { base64 <"$bundle" 2>/dev/null || base64 "$bundle"; } | tr -d '\n' >"$out"
+}
+
+apply_manifestwork_bundle() {
+  local cluster="$1"
+  local bundle="$2"
+  local b64file="$WORK_DIR/mw-${cluster}.b64"
+  bundle_to_single_line_b64 "$bundle" "$b64file"
+  local b64
+  b64="$(cat "$b64file")"
+  local tmp="$WORK_DIR/mw-${cluster}.yaml"
+  cat >"$tmp" <<EOF
+apiVersion: work.open-cluster-management.io/v1
+kind: ManifestWork
+metadata:
+  name: ${MANIFEST_WORK_NAME}
+  namespace: ${cluster}
+spec:
+  workload:
+    manifests:
+      - apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: ${CONFIG_MAP_NAME}
+          namespace: ${TARGET_NAMESPACE}
+        binaryData:
+          ca-bundle.crt: "${b64}"
+EOF
+  oc apply -f "$tmp"
+  log "ManifestWork ${cluster}/${MANIFEST_WORK_NAME} applied (ConfigMap)"
+}
+
+apply_manifestwork_proxy() {
+  local cluster="$1"
+  local tmp="$WORK_DIR/mw-proxy-${cluster}.yaml"
+  cat >"$tmp" <<EOF
+apiVersion: work.open-cluster-management.io/v1
+kind: ManifestWork
+metadata:
+  name: ${MANIFEST_WORK_PROXY_NAME}
+  namespace: ${cluster}
+spec:
+  workload:
+    manifests:
+      - apiVersion: config.openshift.io/v1
+        kind: Proxy
+        metadata:
+          name: cluster
+        spec:
+          trustedCA:
+            name: ${CONFIG_MAP_NAME}
+EOF
+  oc apply -f "$tmp"
+  log "ManifestWork ${cluster}/${MANIFEST_WORK_PROXY_NAME} applied (Proxy trustedCA)"
+}
+
+rm -rf "$RAW_DIR" "$PEM_DIR"
+mkdir -p "$RAW_DIR" "$PEM_DIR"
+
+# --- Hub ---
+log "extract hub trusted bundle"
+extract_trusted_ca_bundle "hub" "$RAW_DIR/hub-trusted.crt" "" || true
+if [[ "$INCLUDE_INGRESS_CA" == "true" ]]; then
+  extract_ingress_ca "hub" "$RAW_DIR/hub-ingress.crt" "" || true
+fi
+
+selector_args=()
+if [[ -n "$MANAGED_CLUSTER_LABEL_SELECTOR" ]]; then
+  selector_args=(--selector="$MANAGED_CLUSTER_LABEL_SELECTOR")
+fi
+
+CLUSTERS=()
+while IFS= read -r cname; do
+  [[ -n "$cname" ]] && CLUSTERS+=("$cname")
+done < <(oc get managedclusters "${selector_args[@]}" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+
+# --- spokePush: deploy/update push agents before reading bundles from hub ---
+if [[ "$MANAGED_CLUSTER_CA_SOURCE" == "spokePush" ]]; then
+  for cluster in "${CLUSTERS[@]}"; do
+    [[ -n "$cluster" ]] || continue
+    if is_excluded "$cluster"; then
+      continue
+    fi
+    if [[ "$WAIT_FOR_AVAILABLE" == "true" ]]; then
+      wait_managed_cluster_available "$cluster" || {
+        log "skip push agent ${cluster} (not available)"
+        continue
+      }
+    fi
+    provision_spoke_push_manifestwork "$cluster" || log "skip push agent ${cluster} (provision failed)"
+  done
+fi
+
+# --- Managed clusters (gather) ---
+for cluster in "${CLUSTERS[@]}"; do
+  [[ -n "$cluster" ]] || continue
+  if is_excluded "$cluster"; then
+    log "skip excluded cluster ${cluster}"
+    continue
+  fi
+  if [[ "$WAIT_FOR_AVAILABLE" == "true" ]]; then
+    wait_managed_cluster_available "$cluster" || {
+      log "skip ${cluster} (not available)"
+      continue
+    }
+  fi
+
+  if [[ "$MANAGED_CLUSTER_CA_SOURCE" == "spokePush" ]]; then
+    gather_pushed_bundle_from_hub "$cluster" "$RAW_DIR/${cluster}-pushed.crt" || true
+  elif [[ "$MANAGED_CLUSTER_CA_SOURCE" == "acm" ]]; then
+    extract_acm_client_ca_bundles "$cluster" "$RAW_DIR/${cluster}-acm-client.crt" || true
+    if [[ "$INCLUDE_INGRESS_CA" == "true" ]]; then
+      log "note: spoke ingress CA requires spokeTrustedCaBundle (skipping ${cluster})"
+    fi
+  else
+    kc_path=""
+    if kc_path="$(write_spoke_kubeconfig "$cluster")"; then
+      extract_trusted_ca_bundle "$cluster" "$RAW_DIR/${cluster}-trusted.crt" "$kc_path" || true
+      if [[ "$INCLUDE_INGRESS_CA" == "true" ]]; then
+        extract_ingress_ca "$cluster" "$RAW_DIR/${cluster}-ingress.crt" "$kc_path" || true
+      fi
+    else
+      log "skip ${cluster} (no kubeconfig for spokeTrustedCaBundle mode)"
+    fi
+  fi
+done
+
+n=0
+for rf in "$RAW_DIR"/*.crt; do
+  [[ -e "$rf" ]] || continue
+  [[ -s "$rf" ]] || continue
+  n=$((n + 1))
+  split_pem_file_to_dir "$rf" "$PEM_DIR/batch-${n}"
+done
+
+if [[ -n "$ADDITIONAL_CA_FILE" && -f "$ADDITIONAL_CA_FILE" && -s "$ADDITIONAL_CA_FILE" ]]; then
+  split_pem_file_to_dir "$ADDITIONAL_CA_FILE" "$PEM_DIR/additional"
+fi
+
+FLAT="$WORK_DIR/all-split"
+mkdir -p "$FLAT"
+i=0
+while IFS= read -r -d '' pemf; do
+  i=$((i + 1))
+  cp "$pemf" "$FLAT/cert-$(printf '%06d' "$i").pem"
+done < <(find "$PEM_DIR" -type f -name '*.pem' -print0 2>/dev/null || true)
+
+BUNDLE_OUT="$WORK_DIR/ca-bundle-deduped.crt"
+dedupe_pem_collection "$FLAT" "$BUNDLE_OUT"
+
+if [[ ! -s "$BUNDLE_OUT" ]]; then
+  log "no PEM material after merge/dedupe; exiting error"
+  exit 1
+fi
+
+log "deduped bundle size $(wc -c <"$BUNDLE_OUT") bytes"
+
+apply_ca_configmap "hub" "$BUNDLE_OUT" ""
+patch_proxy_trusted_ca "hub" ""
+
+for cluster in "${CLUSTERS[@]}"; do
+  [[ -n "$cluster" ]] || continue
+  if is_excluded "$cluster"; then
+    continue
+  fi
+  if [[ "$DISTRIBUTE_TO_SPOKES" == "manifestwork" ]]; then
+    apply_manifestwork_bundle "$cluster" "$BUNDLE_OUT"
+    if [[ "$MANIFESTWORK_PATCH_CLUSTER_PROXY" == "true" ]]; then
+      apply_manifestwork_proxy "$cluster"
+    fi
+  else
+    kc_path=""
+    if ! kc_path="$(write_spoke_kubeconfig "$cluster")"; then
+      log "skip ${cluster} (no kubeconfig for distribution)"
+      continue
+    fi
+    apply_ca_configmap "$cluster" "$BUNDLE_OUT" "$kc_path"
+    patch_proxy_trusted_ca "$cluster" "$kc_path"
+  fi
+done
+
+log "done"
