@@ -137,6 +137,8 @@ policy:
   enabled: true
   # Base namespace for ACM policy workspace when placementRef.namespace is empty.
   hubNamespace: open-cluster-management
+  # Hub Policy metadata.name; combined length with policy workspace namespace must be <= 62 (ACM webhook).
+  # Default is derived (vpca-<release>); set explicitly only if you need a stable name and it fits the limit.
   name: ""
   createPlacement: true
   # When false, do not render ManagedClusterSetBinding (avoid duplicate ownership with another GitOps app or ACM).

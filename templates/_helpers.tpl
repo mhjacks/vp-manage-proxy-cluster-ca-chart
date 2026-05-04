@@ -58,3 +58,28 @@ policy placement objects stay in one workspace (PlacementBinding has no cross-na
 {{- define "vpProxyCa.policyWorkspaceNamespace" -}}
 {{- .Values.policy.placementRef.namespace | default .Values.policy.hubNamespace -}}
 {{- end }}
+
+{{/*
+ACM Policy validating webhook: len(policyNamespace) + len(policy.metadata.name) <= 62.
+Default: vpca-<truncated Release.Name> to stay under the limit with long hub namespaces.
+Explicit policy.name: must satisfy the same constraint or template fails.
+*/}}
+{{- define "vpProxyCa.policyResourceName" -}}
+{{- $ns := include "vpProxyCa.policyWorkspaceNamespace" . }}
+{{- $max := sub 62 (len $ns) | int }}
+{{- $prefix := "vpca-" }}
+{{- $prefixLen := len $prefix }}
+{{- if lt $max (add $prefixLen 1) }}
+{{- fail (printf "ACM Policy requires len(namespace)+len(name)<=62; namespace %q leaves only %d chars for the policy name" $ns $max) }}
+{{- end }}
+{{- $avail := sub $max $prefixLen | int }}
+{{- $defaultName := printf "%s%s" $prefix (.Release.Name | trunc $avail | trimSuffix "-") }}
+{{- if .Values.policy.name }}
+{{- if gt (add (len $ns) (len .Values.policy.name)) 62 }}
+{{- fail (printf "policy.name %q in namespace %q exceeds ACM limit (combined length must be <= 62); shorten policy.name or the policy workspace namespace" .Values.policy.name $ns) }}
+{{- end }}
+{{- .Values.policy.name }}
+{{- else }}
+{{- $defaultName }}
+{{- end }}
+{{- end }}

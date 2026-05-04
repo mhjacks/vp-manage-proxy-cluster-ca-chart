@@ -2,7 +2,7 @@
 {{- fail "policy.enabled requires policy.placementRef.name (workspace namespace: policy.placementRef.namespace or policy.hubNamespace)" }}
 {{- end }}
 {{- if .Values.policy.enabled }}
-{{- $policyName := .Values.policy.name | default (printf "%s-proxy-trusted-ca" (include "vpProxyCa.fullname" .)) }}
+{{- $policyName := include "vpProxyCa.policyResourceName" . }}
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
 metadata:

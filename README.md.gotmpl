@@ -254,6 +254,8 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 
 ## Notable changes
 
+- **ACM Policy name**: the governance webhook requires **`len(policy namespace) + len(policy name) <= 62`**. The chart default is **`vpca-<truncated Helm release name>`** when **`policy.name`** is empty. Remove stale **`Policy`** / **`PlacementBinding`** with the old long name after upgrade if needed.
+
 {{ template "chart.homepageLine" . }}
 
 {{ template "chart.maintainersSection" . }}
