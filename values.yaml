@@ -2,6 +2,14 @@
 # Hub namespace for the CronJob/Job, RBAC, script ConfigMap, and optional additional-ca Secret.
 namespace: openshift-config
 
+# When false, skip ACM APIs (ManagedCluster, ManifestWork), Governance Policy, and spoke-push agents.
+# The gather job only merges hub openshift-config-managed/trusted-ca-bundle (+ optional ingress and
+# additionalCaBundles) and applies ConfigMap + Proxy/cluster on this cluster (local hub only).
+# Default true: multicluster rollout and policy match an ACM hub.
+acm:
+  # -- When false, hub-only proxy CA (no multicluster); policy.* and spokePush hub assets are not applied.
+  enabled: true
+
 nameOverride: ""
 fullnameOverride: ""
 
@@ -128,7 +136,8 @@ clusterReadinessSleepSeconds: 30
 # -- PEM strings merged into the gather bundle before fingerprint de-duplication; see README Overview "Injecting extra CA material".
 additionalCaBundles: []
 
-# ACM Policy + PlacementBinding (default on): Governance / console visibility for Proxy trustedCA vs configMapName.
+# ACM Policy + PlacementBinding (default on when acm.enabled): Governance / console visibility for Proxy trustedCA vs configMapName.
+# Templates render only if acm.enabled is true; set acm.enabled false for standalone OpenShift (hub-only gather).
 # Recommended to keep enabled so ACM shows per-cluster compliance alongside ManifestWork rollout (Policy does not gate MW).
 # If Placement selects zero clusters, hub Policy status may stay empty while MW still applies the bundle—fix Placement/bindings.
 # The Job/CronJob owns ConfigMap content; Policy reports whether spokes keep Proxy trustedCA pointed at that ConfigMap name.

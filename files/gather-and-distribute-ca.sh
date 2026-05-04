@@ -1,6 +1,7 @@
 #!/bin/bash
 # Aggregates trust material on the hub, de-duplicates PEM certs, applies a
-# ConfigMap + cluster Proxy trustedCA on the hub, then on each ManagedCluster.
+# ConfigMap + cluster Proxy trustedCA on the hub, then on each ManagedCluster when ACM_ENABLED is true.
+# When ACM_ENABLED is false, only hub material is merged and the hub Proxy is updated (no multicluster APIs).
 #
 # Managed cluster CA sources:
 # - acm: ManagedCluster.spec.managedClusterClientConfigs[].caBundle (hub API only).
@@ -36,6 +37,7 @@ DISTRIBUTE_TO_SPOKES="${DISTRIBUTE_TO_SPOKES:-manifestwork}"
 MANIFEST_WORK_NAME="${MANIFEST_WORK_NAME:?}"
 MANIFEST_WORK_PROXY_NAME="${MANIFEST_WORK_PROXY_NAME:?}"
 MANIFESTWORK_PATCH_CLUSTER_PROXY="${MANIFESTWORK_PATCH_CLUSTER_PROXY:-true}"
+ACM_ENABLED="${ACM_ENABLED:-true}"
 
 SPOKE_PUSH_HUB_NAMESPACE="${SPOKE_PUSH_HUB_NAMESPACE:-vp-proxy-ca-bundles}"
 SPOKE_PUSH_SPOKE_NAMESPACE="${SPOKE_PUSH_SPOKE_NAMESPACE:-vp-proxy-ca-sync}"
@@ -47,6 +49,13 @@ PUSH_AGENT_IMAGE="${PUSH_AGENT_IMAGE:?}"
 
 log() { echo "[vp-proxy-ca] $*"; }
 
+hub_only_mode() {
+  case "${ACM_ENABLED}" in
+    false|False|FALSE|0|no|No|NO) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Default-on: spokes should get the same Proxy trustedCA wiring as the hub unless explicitly disabled.
 manifestwork_proxy_patch_enabled() {
   case "${MANIFESTWORK_PATCH_CLUSTER_PROXY:-true}" in
@@ -56,13 +65,19 @@ manifestwork_proxy_patch_enabled() {
 }
 
 VP_SPOKE_PUSH_INCLUDE_DIR="${VP_SPOKE_PUSH_INCLUDE_DIR:-/includes/spoke-push}"
-if [[ "$MANAGED_CLUSTER_CA_SOURCE" == "spokePush" ]]; then
+if [[ "$MANAGED_CLUSTER_CA_SOURCE" == "spokePush" ]] && ! hub_only_mode; then
   if [[ ! -f "${VP_SPOKE_PUSH_INCLUDE_DIR}/build-manifestwork.sh" ]]; then
     log "FATAL: spokePush requires include scripts at ${VP_SPOKE_PUSH_INCLUDE_DIR}/build-manifestwork.sh (ConfigMap volume)"
     exit 1
   fi
   # shellcheck source=/dev/null
   source "${VP_SPOKE_PUSH_INCLUDE_DIR}/build-manifestwork.sh"
+fi
+if hub_only_mode; then
+  log "ACM disabled (ACM_ENABLED=false): hub-only — merge hub trusted material and apply ${TARGET_NAMESPACE}/${CONFIG_MAP_NAME} + Proxy/cluster (no ManagedCluster / ManifestWork / spoke agents)"
+  if [[ "$MANAGED_CLUSTER_CA_SOURCE" == "spokePush" ]]; then
+    log "note: managedClusterCaSource spokePush requires ACM; ignoring spoke material in this run"
+  fi
 fi
 
 is_excluded() {
@@ -370,12 +385,14 @@ if [[ -n "$MANAGED_CLUSTER_LABEL_SELECTOR" ]]; then
 fi
 
 CLUSTERS=()
-while IFS= read -r cname; do
-  [[ -n "$cname" ]] && CLUSTERS+=("$cname")
-done < <(oc get managedclusters "${selector_args[@]}" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+if ! hub_only_mode; then
+  while IFS= read -r cname; do
+    [[ -n "$cname" ]] && CLUSTERS+=("$cname")
+  done < <(oc get managedclusters "${selector_args[@]}" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+fi
 
 # --- spokePush: deploy/update push agents before reading bundles from hub ---
-if [[ "$MANAGED_CLUSTER_CA_SOURCE" == "spokePush" ]]; then
+if [[ "$MANAGED_CLUSTER_CA_SOURCE" == "spokePush" ]] && ! hub_only_mode; then
   for cluster in "${CLUSTERS[@]}"; do
     [[ -n "$cluster" ]] || continue
     if is_excluded "$cluster"; then
@@ -392,38 +409,40 @@ if [[ "$MANAGED_CLUSTER_CA_SOURCE" == "spokePush" ]]; then
 fi
 
 # --- Managed clusters (gather) ---
-for cluster in "${CLUSTERS[@]}"; do
-  [[ -n "$cluster" ]] || continue
-  if is_excluded "$cluster"; then
-    log "skip excluded cluster ${cluster}"
-    continue
-  fi
-  if [[ "$WAIT_FOR_AVAILABLE" == "true" ]]; then
-    wait_managed_cluster_available "$cluster" || {
-      log "skip ${cluster} (not available)"
+if ! hub_only_mode; then
+  for cluster in "${CLUSTERS[@]}"; do
+    [[ -n "$cluster" ]] || continue
+    if is_excluded "$cluster"; then
+      log "skip excluded cluster ${cluster}"
       continue
-    }
-  fi
-
-  if [[ "$MANAGED_CLUSTER_CA_SOURCE" == "spokePush" ]]; then
-    gather_pushed_bundle_from_hub "$cluster" "$RAW_DIR/${cluster}-pushed.crt" || true
-  elif [[ "$MANAGED_CLUSTER_CA_SOURCE" == "acm" ]]; then
-    extract_acm_client_ca_bundles "$cluster" "$RAW_DIR/${cluster}-acm-client.crt" || true
-    if [[ "$INCLUDE_INGRESS_CA" == "true" ]]; then
-      log "note: spoke ingress CA requires spokeTrustedCaBundle (skipping ${cluster})"
     fi
-  else
-    kc_path=""
-    if kc_path="$(write_spoke_kubeconfig "$cluster")"; then
-      extract_trusted_ca_bundle "$cluster" "$RAW_DIR/${cluster}-trusted.crt" "$kc_path" || true
+    if [[ "$WAIT_FOR_AVAILABLE" == "true" ]]; then
+      wait_managed_cluster_available "$cluster" || {
+        log "skip ${cluster} (not available)"
+        continue
+      }
+    fi
+
+    if [[ "$MANAGED_CLUSTER_CA_SOURCE" == "spokePush" ]]; then
+      gather_pushed_bundle_from_hub "$cluster" "$RAW_DIR/${cluster}-pushed.crt" || true
+    elif [[ "$MANAGED_CLUSTER_CA_SOURCE" == "acm" ]]; then
+      extract_acm_client_ca_bundles "$cluster" "$RAW_DIR/${cluster}-acm-client.crt" || true
       if [[ "$INCLUDE_INGRESS_CA" == "true" ]]; then
-        extract_ingress_ca "$cluster" "$RAW_DIR/${cluster}-ingress.crt" "$kc_path" || true
+        log "note: spoke ingress CA requires spokeTrustedCaBundle (skipping ${cluster})"
       fi
     else
-      log "skip ${cluster} (no kubeconfig for spokeTrustedCaBundle mode)"
+      kc_path=""
+      if kc_path="$(write_spoke_kubeconfig "$cluster")"; then
+        extract_trusted_ca_bundle "$cluster" "$RAW_DIR/${cluster}-trusted.crt" "$kc_path" || true
+        if [[ "$INCLUDE_INGRESS_CA" == "true" ]]; then
+          extract_ingress_ca "$cluster" "$RAW_DIR/${cluster}-ingress.crt" "$kc_path" || true
+        fi
+      else
+        log "skip ${cluster} (no kubeconfig for spokeTrustedCaBundle mode)"
+      fi
     fi
-  fi
-done
+  done
+fi
 
 n=0
 for rf in "$RAW_DIR"/*.crt; do
@@ -458,29 +477,31 @@ log "deduped bundle size $(wc -c <"$BUNDLE_OUT") bytes"
 apply_ca_configmap "hub" "$BUNDLE_OUT" ""
 patch_proxy_trusted_ca "hub" ""
 
-for cluster in "${CLUSTERS[@]}"; do
-  [[ -n "$cluster" ]] || continue
-  if is_excluded "$cluster"; then
-    continue
-  fi
-  if [[ "$DISTRIBUTE_TO_SPOKES" == "manifestwork" ]]; then
-    # Hub is already updated above; ACM uses ManagedCluster "local-cluster" for the hub.
-    # ManifestWork in local-cluster would make work-agent apply the same openshift-config
-    # ConfigMap and Proxy, causing SSA conflicts with this job's apply_ca_configmap/patch_proxy.
-    if [[ "$cluster" == "local-cluster" ]]; then
-      log "skip ManifestWork for local-cluster (hub ConfigMap and Proxy already applied in-cluster)"
+if ! hub_only_mode; then
+  for cluster in "${CLUSTERS[@]}"; do
+    [[ -n "$cluster" ]] || continue
+    if is_excluded "$cluster"; then
       continue
     fi
-    apply_manifestwork_spoke_rollout "$cluster" "$BUNDLE_OUT"
-  else
-    kc_path=""
-    if ! kc_path="$(write_spoke_kubeconfig "$cluster")"; then
-      log "skip ${cluster} (no kubeconfig for distribution)"
-      continue
+    if [[ "$DISTRIBUTE_TO_SPOKES" == "manifestwork" ]]; then
+      # Hub is already updated above; ACM uses ManagedCluster "local-cluster" for the hub.
+      # ManifestWork in local-cluster would make work-agent apply the same openshift-config
+      # ConfigMap and Proxy, causing SSA conflicts with this job's apply_ca_configmap/patch_proxy.
+      if [[ "$cluster" == "local-cluster" ]]; then
+        log "skip ManifestWork for local-cluster (hub ConfigMap and Proxy already applied in-cluster)"
+        continue
+      fi
+      apply_manifestwork_spoke_rollout "$cluster" "$BUNDLE_OUT"
+    else
+      kc_path=""
+      if ! kc_path="$(write_spoke_kubeconfig "$cluster")"; then
+        log "skip ${cluster} (no kubeconfig for distribution)"
+        continue
+      fi
+      apply_ca_configmap "$cluster" "$BUNDLE_OUT" "$kc_path"
+      patch_proxy_trusted_ca "$cluster" "$kc_path"
     fi
-    apply_ca_configmap "$cluster" "$BUNDLE_OUT" "$kc_path"
-    patch_proxy_trusted_ca "$cluster" "$kc_path"
-  fi
-done
+  done
+fi
 
 log "done"

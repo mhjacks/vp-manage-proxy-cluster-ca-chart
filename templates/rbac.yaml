@@ -1,5 +1,6 @@
-{{- $needSecrets := or (eq .Values.distributeToSpokes "kubeconfig") (eq .Values.managedClusterCaSource "spokeTrustedCaBundle") }}
-{{- $spokePush := eq .Values.managedClusterCaSource "spokePush" }}
+{{- $needSecrets := and .Values.acm.enabled (or (eq .Values.distributeToSpokes "kubeconfig") (eq .Values.managedClusterCaSource "spokeTrustedCaBundle")) }}
+{{- $spokePush := and .Values.acm.enabled (eq .Values.managedClusterCaSource "spokePush") }}
+{{- $manifestWork := and .Values.acm.enabled (eq .Values.distributeToSpokes "manifestwork") }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -13,7 +14,7 @@ rules:
     resources: ["secrets"]
     verbs: ["get", "list"]
 {{- end }}
-{{- if eq .Values.distributeToSpokes "manifestwork" }}
+{{- if $manifestWork }}
   - apiGroups: ["work.open-cluster-management.io"]
     resources: ["manifestworks"]
     verbs: ["get", "list", "create", "update", "patch", "delete"]
@@ -24,9 +25,11 @@ rules:
   - apiGroups: ["config.openshift.io"]
     resources: ["proxies"]
     verbs: ["get", "patch"]
+{{- if .Values.acm.enabled }}
   - apiGroups: ["cluster.open-cluster-management.io"]
     resources: ["managedclusters"]
     verbs: ["get", "list"]
+{{- end }}
 {{- if $spokePush }}
   - apiGroups: [""]
     resources: ["namespaces"]

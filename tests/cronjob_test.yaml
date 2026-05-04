@@ -14,3 +14,17 @@ tests:
       - matchRegex:
           path: spec.jobTemplate.spec.template.spec.containers[0].image
           pattern: "^quay.io/validatedpatterns/imperative-container:"
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: ACM_ENABLED
+            value: "true"
+  - it: sets ACM_ENABLED false for hub-only mode
+    set:
+      acm.enabled: false
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: ACM_ENABLED
+            value: "false"

@@ -1,7 +1,7 @@
-{{- if and .Values.policy.enabled (not .Values.policy.placementRef.name) }}
+{{- if and .Values.policy.enabled .Values.acm.enabled (not .Values.policy.placementRef.name) }}
 {{- fail "policy.enabled requires policy.placementRef.name (workspace namespace: policy.placementRef.namespace or policy.hubNamespace)" }}
 {{- end }}
-{{- if .Values.policy.enabled }}
+{{- if and .Values.policy.enabled .Values.acm.enabled }}
 {{- $ra := .Values.policy.remediationAction | default "inform" | lower }}
 {{- if not (or (eq $ra "inform") (eq $ra "enforce")) }}
 {{- fail "policy.remediationAction must be inform or enforce" }}

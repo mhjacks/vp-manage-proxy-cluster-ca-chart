@@ -3,15 +3,19 @@
 
 ![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
 
-Hub-side chart for OpenShift with ACM. By default it distributes a merged CA bundle to every ManagedCluster via ManifestWork (spoke push + hub ingress, then gather job), including Proxy/cluster trustedCA on spokes unless explicitly turned off. ACM Policy + PlacementBinding (default on) add Governance visibility for Proxy trustedCA vs the merged bundle ConfigMap with default inform remediation (no fight with ManifestWork); they do not gate rollout. Override policy.* or excludeManagedClusters as needed.
+Hub-side chart for OpenShift. With ACM (default), distributes a merged CA bundle to ManagedClusters via ManifestWork (spoke push + hub ingress, then gather job), including Proxy/cluster trustedCA on spokes unless turned off. Set acm.enabled false for a standalone cluster: merge hub trusted-ca only and manage local Proxy/ConfigMap without ACM APIs. ACM Policy + PlacementBinding (when acm.enabled) add Governance visibility with default inform remediation; they do not gate rollout. Override policy.* or excludeManagedClusters as needed.
 
-**At a glance:** **ManifestWork** (default) rolls out the merged CA **ConfigMap** and **`Proxy/cluster` `trustedCA`** to spokes; **ACM Policy + PlacementBinding** (default **on**) add **Governance / GRC** compliance and **cluster violation** detail for the same **`Proxy` `trustedCA` → `configMapName`** contract using default **`policy.remediationAction: inform`** so ACM does **not** fight **ManifestWork** over **`Proxy`**. Override **policy.*** or **excludeManagedClusters** as needed. See **Policy visibility in ACM** under Overview.
+**At a glance:** With **`acm.enabled: true`** (default), **ManifestWork** rolls the merged CA **ConfigMap** and **`Proxy/cluster` `trustedCA`** to spokes; **ACM Policy + PlacementBinding** add **GRC** compliance and **cluster violation** detail using default **`policy.remediationAction: inform`**. With **`acm.enabled: false`**, the job only merges **hub** trust material and updates **local** **`openshift-config`** **ConfigMap** + **`Proxy`** (no **ManagedCluster** / **ManifestWork** / Policy). Override **policy.*** or **excludeManagedClusters** as needed. See **Policy visibility in ACM** and **Hub-only (`acm.enabled: false`)** under Overview.
 
 ## Overview
 
 > **GitOps — `ManagedClusterSetBinding` / `global`:** This chart defaults to **`policy.createManagedClusterSetBindings: false`**, so it does **not** render **`ManagedClusterSetBinding`**. Argo CD often shows **`global` “disappearing”** when **two Applications** (or ACM plus this chart) both try to own the same **`ManagedClusterSetBinding`** name in the same namespace: sync replaces or prunes the object. **Pick one writer:** keep **`ManagedClusterSetBinding`** for **`global`** (and your other **`policy.placement.clusterSets`**) in a **platform / ACM** Application, and leave this chart to **`Placement`**, **`Policy`**, and **`PlacementBinding`** only. Set **`policy.createManagedClusterSetBindings: true`** only on hubs where **nothing else** creates those bindings. Chart-created bindings still carry **`helm.sh/resource-policy: keep`** when enabled.
 
 > **GitOps — Argo CD and hub `Policy.status`:** The governance propagator updates **`Policy.status`** on the hub after sync. Argo CD often reports **OutOfSync** if the rendered manifest omits that subtree. On the **Application** that installs this chart, add **`ignoreDifferences`** for **`policy.open-cluster-management.io` / `Policy`** with **`jqPathExpressions: ['.status']`** (or equivalent) so Argo compares only **spec** while ACM owns **status**. This does not change spoke behavior.
+
+### Hub-only (`acm.enabled: false`)
+
+Use on **standalone OpenShift** (no multicluster engine / no **ManagedCluster** API). The gather job **does not** list clusters, deploy **spoke-push** agents, create **ManifestWork**, or render **Policy** / **Placement**. It **only** reads **`openshift-config-managed/trusted-ca-bundle`** (and optional **ingress** / **`additionalCaBundles`**), de-duplicates, then applies **`configMapName`** and patches **`Proxy/cluster`** on **this** cluster. Values such as **`managedClusterCaSource`** and **`distributeToSpokes`** are ignored for multicluster behavior while **`acm.enabled`** is **false** (the script logs once if **`spokePush`** was selected).
 
 ### Injecting extra CA material (`additionalCaBundles`)
 
@@ -24,6 +28,8 @@ Use **`additionalCaBundles`** in **`values.yaml`** when you need PEMs in the **c
 The default path is **`distributeToSpokes: manifestwork`**: the gather **CronJob/Job** lists hub **ManagedCluster** objects (respecting **`managedClusterLabelSelector`** and **`excludeManagedClusters`**), then applies **ManifestWork** in each cluster namespace so the **work agent** reconciles the merged **ConfigMap** and (unless disabled) **`Proxy/cluster` `trustedCA`**. That is the chart’s primary “distribute to spokes” behavior. **ManifestWork for the managed cluster name `local-cluster` is skipped** because the hub copy is already applied in-cluster.
 
 ### Policy visibility in ACM (recommended)
+
+Requires **`acm.enabled: true`** (Policy templates are not rendered when **`acm.enabled`** is **false**).
 
 Keep **`policy.enabled: true`** (the default) when you want **ACM Governance / GRC** visibility into CA distribution outcomes: the hub **Policy** and **replicated policies** on each managed cluster surface **compliance** (and **cluster violations** / NonCompliant detail, including **`policy.configurationCustomMessage`**) for **`Proxy/cluster`** **`spec.trustedCA.name`** matching **`configMapName`**. Default **`policy.remediationAction: inform`** means the policy engine **evaluates and reports** only—**ManifestWork** (by default) **applies** **`Proxy`** on spokes, so you get populated GRC columns **without** two controllers reconciling the same **`Proxy`**. Set **`policy.remediationAction: enforce`** only when **`manifestWork.patchClusterProxy`** is **false** or you intentionally want the policy controller to remediate **`Proxy`**.
 
@@ -261,7 +267,8 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 | `additionalCaBundles` | **Inject** extra PEMs into the merged bundle (see **Injecting extra CA material** above); merged then fingerprint de-duplicated. |
 | `includeIngressCA` | Hub: `router-ca` when true. Spokes: `spokeTrustedCaBundle` (pull) or `spokePush` (push script appends ingress PEMs). |
 | `cronJob` / `syncJob` | Scheduled refresh vs one-shot post-install/upgrade Job. |
-| `policy` | Default **enabled**: ACM **Policy** + **PlacementBinding** for **GRC** compliance and **violations** vs **`configMapName`**. Default **`remediationAction: inform`** avoids fighting **ManifestWork** on **`Proxy`**; **`configurationCustomMessage`** improves violation text. **`createManagedClusterSetBindings`** defaults **false** (GitOps). |
+| `acm.enabled` | **true** (default): multicluster + Policy. **false**: hub-only **ConfigMap** + **Proxy** on this cluster; no ACM CRs from this chart. |
+| `policy` | When **`acm.enabled`**: default **enabled** — **Policy** + **PlacementBinding** for **GRC** vs **`configMapName`**. Default **`remediationAction: inform`**; **`configurationCustomMessage`** for violation text. **`createManagedClusterSetBindings`** defaults **false** (GitOps). |
 
 ## References
 
@@ -273,11 +280,13 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 - **ACM Policy name**: the governance webhook requires **`len(policy namespace) + len(policy name) <= 62`**. The chart default is **`vpca-<truncated Helm release name>`** when **`policy.name`** is empty. Remove stale **`Policy`** / **`PlacementBinding`** with the old long name after upgrade if needed.
 - **`policy.createManagedClusterSetBindings`** defaults to **`false`**: manage **`ManagedClusterSetBinding/global`** in a single platform Argo Application; set **`true`** only when this chart should own those objects.
 - **`policy.remediationAction`** defaults to **`inform`**: GRC shows compliance and violation detail while **ManifestWork** remains the default applier for spoke **`Proxy`**; use **`enforce`** only when you are not double-writing **`Proxy`** with **`manifestWork.patchClusterProxy: true`**.
+- **`acm.enabled`**: set **`false`** for standalone hubs to manage **only** the local **Proxy** bundle without **ManagedCluster** / **ManifestWork** / Governance objects from this chart.
 
 ## Values
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| acm.enabled | bool | `true` | When false, hub-only proxy CA (no multicluster); policy.* and spokePush hub assets are not applied. |
 | additionalCaBundles | list | `[]` | PEM strings merged into the gather bundle before fingerprint de-duplication; see README Overview "Injecting extra CA material". |
 | clusterReadinessMaxAttempts | int | `150` |  |
 | clusterReadinessSleepSeconds | int | `30` |  |

@@ -3,7 +3,7 @@ Shared container definition for CronJob and sync Job.
 */}}
 {{- define "vpProxyCa.gatherContainer" }}
 {{- $hasAdditional := gt (len .Values.additionalCaBundles) 0 }}
-{{- $spokePush := eq .Values.managedClusterCaSource "spokePush" }}
+{{- $spokePush := and (eq .Values.managedClusterCaSource "spokePush") .Values.acm.enabled }}
 - name: gather-ca
   image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
   imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -53,6 +53,8 @@ Shared container definition for CronJob and sync Job.
       value: {{ .Values.clusterReadinessMaxAttempts | toString | quote }}
     - name: CLUSTER_READINESS_SLEEP_SECONDS
       value: {{ .Values.clusterReadinessSleepSeconds | toString | quote }}
+    - name: ACM_ENABLED
+      value: {{ .Values.acm.enabled | toString | quote }}
     {{- if $hasAdditional }}
     - name: ADDITIONAL_CA_FILE
       value: /extra/ca.pem
@@ -84,7 +86,7 @@ Shared container definition for CronJob and sync Job.
 
 {{- define "vpProxyCa.gatherVolumes" }}
 {{- $hasAdditional := gt (len .Values.additionalCaBundles) 0 }}
-{{- $spokePush := eq .Values.managedClusterCaSource "spokePush" }}
+{{- $spokePush := and (eq .Values.managedClusterCaSource "spokePush") .Values.acm.enabled }}
 - name: script
   configMap:
     name: {{ include "vpProxyCa.fullname" . }}-script
