@@ -324,6 +324,7 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 - **`policy.remediationAction`** defaults to **`inform`**: GRC shows compliance and violation detail while **ManifestWork** remains the default applier for spoke **`Proxy`**; use **`enforce`** only when you are not double-writing **`Proxy`** with **`manifestWork.patchClusterProxy: true`**.
 - **`acm.enabled`**: set **`false`** for standalone hubs to manage **only** the local **Proxy** bundle without **ManagedCluster** / **ManifestWork** / Governance objects from this chart.
 - **Gather inputs**: hub and spokes (per **`managedClusterCaSource`**) now always attempt **`kube-apiserver-server-ca`** / **`kube-root-ca.crt`** (API) in addition to **`trusted-ca-bundle`**; **`includeIngressCA`** still controls **`router-ca`** ingress PEMs.
+- When **`includeIngressCA`** is **true**, render a **Role** + **RoleBinding** in **`openshift-ingress-operator`** so the gather **ServiceAccount** can **`get`** **`Secret/router-ca`** (previously only **ClusterRole** **Secrets** applied under **`acm.enabled`** + kubeconfig/spokeTrusted paths, so **hub-only** and default **`spokePush`** hubs skipped ingress silently). The gather script logs a **warning** if ingress was requested but no PEM was written.
 
 {{ template "chart.homepageLine" . }}
 

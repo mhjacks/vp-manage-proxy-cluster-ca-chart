@@ -1,0 +1,37 @@
+{{- /*
+  gather-and-distribute-ca.sh reads Secret/router-ca in openshift-ingress-operator for default ingress CA.
+  ClusterRole rules only grant secrets when acm + (kubeconfig|spokeTrustedCaBundle), so spokePush+manifestwork
+  and hub-only (acm.enabled false) previously had no Secret GET — extract_ingress_ca failed silently (|| true).
+*/}}
+{{- if .Values.includeIngressCA }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "vpProxyCa.fullname" . }}-read-router-ca
+  namespace: openshift-ingress-operator
+  labels:
+    app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["router-ca"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "vpProxyCa.fullname" . }}-read-router-ca
+  namespace: openshift-ingress-operator
+  labels:
+    app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "vpProxyCa.fullname" . }}-read-router-ca
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "vpProxyCa.serviceAccountName" . }}
+    namespace: {{ .Values.namespace }}
+{{- end }}

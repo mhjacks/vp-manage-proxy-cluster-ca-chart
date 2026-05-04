@@ -410,6 +410,9 @@ extract_trusted_ca_bundle "hub" "$RAW_DIR/hub-trusted.crt" "" || true
 extract_kube_apiserver_ca "hub" "$RAW_DIR/hub-api.crt" "" || true
 if [[ "$INCLUDE_INGRESS_CA" == "true" ]]; then
   extract_ingress_ca "hub" "$RAW_DIR/hub-ingress.crt" "" || true
+  if [[ ! -s "$RAW_DIR/hub-ingress.crt" ]]; then
+    log "warning: hub ingress CA not merged (expected Secret openshift-ingress-operator/router-ca tls.crt or ca.crt); check RBAC get on that Secret and Secret presence"
+  fi
 fi
 
 selector_args=()
