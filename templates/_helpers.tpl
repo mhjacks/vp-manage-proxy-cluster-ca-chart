@@ -49,3 +49,12 @@ Stable ManifestWork object name (<=63 chars) for each managed cluster namespace.
 {{- $base := .Values.spokePush.manifestWorkNameOverride | default (printf "%s-push-agent" (include "vpProxyCa.fullname" .)) }}
 {{- $base | trunc 63 | trimSuffix "-" }}
 {{- end }}
+
+{{/*
+Namespace for ACM Policy, PlacementBinding, Placement, and ManagedClusterSetBinding.
+When policy.placementRef.namespace is non-empty it overrides policy.hubNamespace so all
+policy placement objects stay in one workspace (PlacementBinding has no cross-namespace placementRef).
+*/}}
+{{- define "vpProxyCa.policyWorkspaceNamespace" -}}
+{{- .Values.policy.placementRef.namespace | default .Values.policy.hubNamespace -}}
+{{- end }}

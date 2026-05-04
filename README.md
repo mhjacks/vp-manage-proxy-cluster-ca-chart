@@ -16,7 +16,7 @@ Helm chart for the **hub** cluster (OpenShift + ACM). It periodically aggregates
 
 Certificates are **split and de-duplicated** by SHA-256 certificate fingerprint, then written to a single `ConfigMap` (`ca-bundle.crt`) in `openshift-config`. On the hub the job applies the ConfigMap and patches **`Proxy/cluster`**. On spokes (defaults) it applies **`ManifestWork`** objects in each managed cluster namespace so the **work agent** applies the same ConfigMap (and optionally a second ManifestWork for `Proxy` `trustedCA`) — still **no kubeconfig** in the chart or job for rollout. Set `distributeToSpokes: kubeconfig` to push via import secrets instead.
 
-Optional **`additionalCaBundles`** in `values.yaml` are merged before de-duplication (see `values.yaml` for Vault-on-hub vs off-hub notes and a commented PEM example). ACM **Policy** + **PlacementBinding** are **on by default** (`policy.enabled`) to enforce `Proxy` `trustedCA`. When **`policy.createPlacement`** is **true** (default), the chart also applies **`ManagedClusterSetBinding`**(s) plus a **`Placement`** that selects **`policy.placement.clusterSets`** (default **`global`**, the usual ACM default set for all clusters). Set **`policy.createPlacement: false`** and supply your own **Placement** + bindings if needed. Set **`policy.enabled: false`** or align **`manifestWork.patchClusterProxy`** with your governance if Policy alone should own Proxy.
+Optional **`additionalCaBundles`** in `values.yaml` are merged before de-duplication (see `values.yaml` for Vault-on-hub vs off-hub notes and a commented PEM example). ACM **Policy** + **PlacementBinding** are **on by default** (`policy.enabled`) to enforce `Proxy` `trustedCA`. When **`policy.createPlacement`** is **true** (default), the chart also applies **`ManagedClusterSetBinding`**(s) plus a **`Placement`** that selects **`policy.placement.clusterSets`** (default **`global`**, the usual ACM default set for all clusters). Set **`policy.createPlacement: false`** and supply your own **Placement** + bindings if needed. Set **`policy.enabled: false`** or align **`manifestWork.patchClusterProxy`** with your governance if Policy alone should own Proxy. If **`Placement`** reports **`PlacementSatisfied: False`** with reason **`NoIntersection`**, no **`ManagedClusterSetBinding`** in that Placement’s namespace projects your cluster sets (for example **`global`**): confirm **`oc get managedclustersetbinding -n <workspace>`** in the same namespace as **`oc get placement -n <workspace>`** (workspace is **`policy.placementRef.namespace`** if set, otherwise **`policy.hubNamespace`**).
 
 Defaults (**`spokePush`** + **`manifestwork`** + **`manifestWork.patchClusterProxy: true`**) avoid **kubeconfig files** in Git or in the gather pod for rollout; **`spokeTrustedCaBundle`** or **`distributeToSpokes: kubeconfig`** still read ACM import **kubeconfig Secrets on the hub** at runtime.
 
@@ -213,7 +213,7 @@ applications:
 |-----------|----------------------------------|-----|
 | **`openshift-config`** | Usually **omit** from “create” lists (platform namespace already exists). Ensure your GitOps **AppProject** allows deploying into it if that is the chart `namespace`. | Holds the gather CronJob/Job, merged `ConfigMap` (`configMapName`), and hub `Proxy` patch. |
 | **`spokePush.hubNamespace`** (default **`vp-proxy-ca-bundles`**) | **Optional** entry: the chart creates a `Namespace` object for it, but some patterns predeclare namespaces for labels, quotas, or project allowlists. | Per-cluster **`bundle-*`** ConfigMaps and hub-side spoke-push Secrets. |
-| **`policy.hubNamespace`** (default **`open-cluster-management`**) | Usually **omit** if your hub cluster group already installs ACM (that subscription creates the namespace). | ACM **Policy** and **PlacementBinding** when `policy.enabled` is true. |
+| **`policy.placementRef.namespace`** or **`policy.hubNamespace`** (default **`open-cluster-management`**) | Usually **omit** if your hub cluster group already installs ACM (that subscription creates the namespace). When **`placementRef.namespace`** is empty, **`hubNamespace`** is the ACM workspace for **Policy**, **PlacementBinding**, **Placement**, and **ManagedClusterSetBinding**. | **`ManagedClusterSetBinding`** must live in the **same** namespace as **Placement**; otherwise **Placement** shows **`NoIntersection`**. |
 
 **Managed cluster groups (spokes) — `applications` and `namespaces`**
 
@@ -281,11 +281,11 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 | podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | policy.createPlacement | bool | `true` |  |
 | policy.enabled | bool | `true` |  |
-| policy.hubNamespace | string | `"open-cluster-management"` |  |
+| policy.hubNamespace | string | `"open-cluster-management"` | ACM policy workspace when `placementRef.namespace` is empty. |
 | policy.name | string | `""` |  |
 | policy.placement.clusterSets[0] | string | `"global"` |  |
 | policy.placementRef.name | string | `"vp-proxy-ca"` |  |
-| policy.placementRef.namespace | string | `""` |  |
+| policy.placementRef.namespace | string | `""` | If set, overrides `hubNamespace` for Policy, PlacementBinding, Placement, and ManagedClusterSetBinding. |
 | resources.limits.cpu | string | `"1"` |  |
 | resources.limits.memory | string | `"1Gi"` |  |
 | resources.requests.cpu | string | `"200m"` |  |

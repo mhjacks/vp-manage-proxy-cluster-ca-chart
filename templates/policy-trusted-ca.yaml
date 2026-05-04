@@ -1,5 +1,5 @@
 {{- if and .Values.policy.enabled (not .Values.policy.placementRef.name) }}
-{{- fail "policy.enabled requires policy.placementRef.name (namespace defaults to policy.hubNamespace)" }}
+{{- fail "policy.enabled requires policy.placementRef.name (workspace namespace: policy.placementRef.namespace or policy.hubNamespace)" }}
 {{- end }}
 {{- if .Values.policy.enabled }}
 {{- $policyName := .Values.policy.name | default (printf "%s-proxy-trusted-ca" (include "vpProxyCa.fullname" .)) }}
@@ -7,7 +7,7 @@ apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
 metadata:
   name: {{ $policyName }}
-  namespace: {{ .Values.policy.hubNamespace }}
+  namespace: {{ include "vpProxyCa.policyWorkspaceNamespace" . }}
   labels:
     app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
@@ -38,7 +38,7 @@ apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
 metadata:
   name: {{ $policyName }}-binding
-  namespace: {{ .Values.policy.hubNamespace }}
+  namespace: {{ include "vpProxyCa.policyWorkspaceNamespace" . }}
   labels:
     app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}

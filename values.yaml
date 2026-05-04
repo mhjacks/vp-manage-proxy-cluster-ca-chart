@@ -131,13 +131,15 @@ additionalCaBundles: []
 # if you manage Placement and bindings yourself.
 policy:
   enabled: true
+  # Base namespace for ACM policy workspace when placementRef.namespace is empty.
   hubNamespace: open-cluster-management
   name: ""
   createPlacement: true
   placementRef:
     # Default Placement name created when policy.createPlacement is true; override if you use your own Placement.
     name: vp-proxy-ca
-    # Defaults to hubNamespace when empty (Placement lives in the binding namespace).
+    # When non-empty, Policy, PlacementBinding, Placement, and ManagedClusterSetBinding use this namespace
+    # (PlacementBinding cannot reference a Placement in another namespace). Empty uses policy.hubNamespace.
     namespace: ""
   placement:
     # ManagedClusterSets to bind into hubNamespace and to select from (requires clusters to be members of these sets).

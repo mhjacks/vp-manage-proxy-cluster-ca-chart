@@ -1,5 +1,5 @@
 {{- if and .Values.policy.enabled .Values.policy.createPlacement .Values.policy.placementRef.name }}
-{{- $ns := .Values.policy.hubNamespace }}
+{{- $ns := include "vpProxyCa.policyWorkspaceNamespace" . }}
 {{- $placementName := .Values.policy.placementRef.name }}
 {{- $clusterSets := .Values.policy.placement.clusterSets | default (list "global") }}
 {{- range $clusterSets }}
