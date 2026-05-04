@@ -79,6 +79,10 @@ manifestWork:
   # Legacy standalone Proxy ManifestWork name is MANIFEST_WORK_PROXY_NAME for delete-on-upgrade cleanup.
   patchClusterProxy: true
 
+# When true, merge default ingress router CA (openshift-ingress-operator/router-ca) for hub and spokes
+# (where the gather path can reach the spoke API). API / kube-apiserver CAs are always attempted separately
+# (kube-apiserver-server-ca ConfigMap, kube-root-ca.crt fallback, or in-cluster service account CA on the hub / push CronJob).
+# -- Include default ingress `router-ca` PEMs in the merge when hub/spoke API access allows (API CAs are merged regardless).
 includeIngressCA: true
 
 # Wait until ManagedClusterConditionAvailable=True before touching a spoke.
@@ -86,7 +90,7 @@ waitForManagedClusterAvailable: true
 clusterReadinessMaxAttempts: 150
 clusterReadinessSleepSeconds: 30
 
-# Vault is expected on the hub: hub trusted-ca-bundle and ingress CA are gathered into
+# Vault is expected on the hub: hub trusted-ca-bundle, kube-apiserver-server-ca (API), and ingress CA are gathered into
 # the merge, so you normally do not add Vault's CA here. If Vault runs outside the hub (or
 # presents a chain not already in that merged bundle), add the issuing CA PEM(s) below.
 #

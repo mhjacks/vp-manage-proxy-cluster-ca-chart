@@ -6,5 +6,5 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["configmaps"]
-    resourceNames: ["trusted-ca-bundle"]
+    resourceNames: ["trusted-ca-bundle", "kube-apiserver-server-ca"]
     verbs: ["get"]
