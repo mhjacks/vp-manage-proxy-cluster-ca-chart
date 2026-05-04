@@ -202,8 +202,7 @@ applications:
   vp-manage-proxy-cluster-ca:
     name: vp-manage-proxy-cluster-ca
     namespace: openshift-config
-    project: hub
-    path: charts/hub/vp-manage-proxy-cluster-ca
+    # <chart location information>
     # optional: extraValueFiles:
     #   - /values-proxy-ca-hub.yaml
 ```
