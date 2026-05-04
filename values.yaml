@@ -143,6 +143,11 @@ policy:
   hubNamespace: open-cluster-management
   # -- Hub Policy metadata.name; empty uses vpca-<truncated Release.Name> so len(namespace)+len(name)<=62 (ACM webhook).
   name: ""
+  # -- Shown in ACM Governance as policy description (annotation policy.open-cluster-management.io/description).
+  description: >-
+    Ensures OpenShift Proxy/cluster spec.trustedCA.name matches the merged cluster-wide CA bundle
+    ConfigMap (values.configMapName), with enforce remediation. Complements ManifestWork rollout from
+    the same chart; use for drift visibility in the console.
   createPlacement: true
   # -- When false (default), chart does not render ManagedClusterSetBinding; bind policy.placement.clusterSets in the policy workspace via a platform GitOps app. Set true if this chart should own those bindings.
   createManagedClusterSetBindings: false

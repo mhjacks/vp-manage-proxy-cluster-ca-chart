@@ -8,6 +8,8 @@ kind: Policy
 metadata:
   name: {{ $policyName }}
   namespace: {{ include "vpProxyCa.policyWorkspaceNamespace" . }}
+  annotations:
+    policy.open-cluster-management.io/description: {{ .Values.policy.description | quote }}
   labels:
     app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}

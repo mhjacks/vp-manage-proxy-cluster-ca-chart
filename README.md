@@ -305,6 +305,7 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 | podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | policy.createManagedClusterSetBindings | bool | `false` | When false (default), chart does not render ManagedClusterSetBinding; bind policy.placement.clusterSets in the policy workspace via a platform GitOps app. Set true if this chart should own those bindings. |
 | policy.createPlacement | bool | `true` |  |
+| policy.description | string | `"Ensures OpenShift Proxy/cluster spec.trustedCA.name matches the merged cluster-wide CA bundle ConfigMap (values.configMapName), with enforce remediation. Complements ManifestWork rollout from the same chart; use for drift visibility in the console."` | Shown in ACM Governance as policy description (annotation policy.open-cluster-management.io/description). |
 | policy.enabled | bool | `true` | Enable ACM Policy + PlacementBinding for Governance/GRC console visibility of Proxy trustedCA vs configMapName (does not gate ManifestWork). |
 | policy.hubNamespace | string | `"open-cluster-management"` |  |
 | policy.name | string | `""` | Hub Policy metadata.name; empty uses vpca-<truncated Release.Name> so len(namespace)+len(name)<=62 (ACM webhook). |
