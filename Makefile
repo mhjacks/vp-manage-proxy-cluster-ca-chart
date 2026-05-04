@@ -23,7 +23,7 @@ helm-unittest: ## Runs the helm unit tests
 	podman run $(PODMAN_ARGS) -v $(PWD):/apps:rw $(HELM_UNITTEST_IMAGE) .
 
 .PHONY: helm-docs
-helm-docs: ## Generates README.md from values.yaml
+helm-docs: ## Regenerates README.md from README.md.gotmpl, Chart.yaml, and values.yaml
 	# First make sure all values.yaml entries are documented. This can only be enabled once
 	# https://www.github.com/norwoodj/helm-docs/issues/228 is fixed
 	# podman run $(PODMAN_ARGS) -v $(PWD):/helm-docs:rw $(HELM_DOCS_IMAGE) -x

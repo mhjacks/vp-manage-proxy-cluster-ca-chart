@@ -124,26 +124,28 @@ clusterReadinessSleepSeconds: 30
 #     -----END CERTIFICATE-----
 #
 # PEM blocks are merged into the bundle before de-duplication (each list entry is one or more certs).
+# See README "Injecting extra CA material (additionalCaBundles)" for Git-friendly PEM injection and CNO/Vault notes.
+# -- PEM strings merged into the gather bundle before fingerprint de-duplication; see README Overview "Injecting extra CA material".
 additionalCaBundles: []
 
-# ACM Policy + PlacementBinding: optional governance path for Proxy trustedCA (default on).
-# Does not gate ManifestWork; if Placement selects zero clusters, spokes can still receive the bundle via MW.
-# The Job/CronJob still owns ConfigMap content; Policy keeps Proxy wired to that ConfigMap name.
-# When policy.createPlacement is true, the chart also applies ManagedClusterSetBinding(s) + Placement
-# so the default Placement selects clusters (default cluster set "global"). Set createPlacement false
-# if you manage Placement and bindings yourself.
+# ACM Policy + PlacementBinding (default on): Governance / console visibility for Proxy trustedCA vs configMapName.
+# Recommended to keep enabled so ACM shows per-cluster compliance alongside ManifestWork rollout (Policy does not gate MW).
+# If Placement selects zero clusters, hub Policy status may stay empty while MW still applies the bundle—fix Placement/bindings.
+# The Job/CronJob owns ConfigMap content; Policy reports whether spokes keep Proxy trustedCA pointed at that ConfigMap name.
+# When policy.createPlacement is true, the chart applies Placement (default cluster set "global").
+# ManagedClusterSetBinding is optional (policy.createManagedClusterSetBindings); default false for GitOps.
+# Set createPlacement false if you manage Placement yourself.
 # Hub Policy status.complianceState stays empty while Placement selects zero clusters (propagator behavior).
 policy:
+  # -- Enable ACM Policy + PlacementBinding for Governance/GRC console visibility of Proxy trustedCA vs configMapName (does not gate ManifestWork).
   enabled: true
   # Base namespace for ACM policy workspace when placementRef.namespace is empty.
   hubNamespace: open-cluster-management
-  # Hub Policy metadata.name; combined length with policy workspace namespace must be <= 62 (ACM webhook).
-  # Default is derived (vpca-<release>); set explicitly only if you need a stable name and it fits the limit.
+  # -- Hub Policy metadata.name; empty uses vpca-<truncated Release.Name> so len(namespace)+len(name)<=62 (ACM webhook).
   name: ""
   createPlacement: true
-  # When false, do not render ManagedClusterSetBinding (avoid duplicate ownership with another GitOps app or ACM).
-  # Placement still references policy.placement.clusterSets; you must bind those sets into the policy workspace yourself.
-  createManagedClusterSetBindings: true
+  # -- When false (default), chart does not render ManagedClusterSetBinding; bind policy.placement.clusterSets in the policy workspace via a platform GitOps app. Set true if this chart should own those bindings.
+  createManagedClusterSetBindings: false
   placementRef:
     # Default Placement name created when policy.createPlacement is true; override if you use your own Placement.
     name: vp-proxy-ca

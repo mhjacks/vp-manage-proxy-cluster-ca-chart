@@ -4,8 +4,9 @@ description: >-
   Hub-side chart for OpenShift with ACM. By default it distributes a merged CA bundle
   to every ManagedCluster via ManifestWork (spoke push + hub ingress, then gather job),
   including Proxy/cluster trustedCA on spokes unless explicitly turned off.
-  ACM Policy + PlacementBinding optionally mirror Proxy trustedCA through governance;
-  they do not gate ManifestWork rollout. Override policy.* or excludeManagedClusters as needed.
+  ACM Policy + PlacementBinding (default on) add Governance console visibility for Proxy trustedCA
+  vs the merged bundle ConfigMap; they do not gate ManifestWork rollout.
+  Override policy.* or excludeManagedClusters as needed.
 type: application
 version: 0.1.0
 keywords:
