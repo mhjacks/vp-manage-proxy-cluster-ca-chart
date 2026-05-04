@@ -47,6 +47,14 @@ PUSH_AGENT_IMAGE="${PUSH_AGENT_IMAGE:?}"
 
 log() { echo "[vp-proxy-ca] $*"; }
 
+# Default-on: spokes should get the same Proxy trustedCA wiring as the hub unless explicitly disabled.
+manifestwork_proxy_patch_enabled() {
+  case "${MANIFESTWORK_PATCH_CLUSTER_PROXY:-true}" in
+    true|True|TRUE|yes|Yes|YES|1) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 VP_SPOKE_PUSH_INCLUDE_DIR="${VP_SPOKE_PUSH_INCLUDE_DIR:-/includes/spoke-push}"
 if [[ "$MANAGED_CLUSTER_CA_SOURCE" == "spokePush" ]]; then
   if [[ ! -f "${VP_SPOKE_PUSH_INCLUDE_DIR}/build-manifestwork.sh" ]]; then
@@ -269,7 +277,10 @@ bundle_to_single_line_b64() {
   { base64 <"$bundle" 2>/dev/null || base64 "$bundle"; } | tr -d '\n' >"$out"
 }
 
-apply_manifestwork_bundle() {
+# One ManifestWork per cluster so workload.manifests apply in list order: ConfigMap must exist
+# before Proxy references it. Two separate ManifestWorks can reconcile out of order and leave
+# spec.trustedCA unset or rejected on the spoke.
+apply_manifestwork_spoke_rollout() {
   local cluster="$1"
   local bundle="$2"
   local b64file="$WORK_DIR/mw-${cluster}.b64"
@@ -277,7 +288,38 @@ apply_manifestwork_bundle() {
   local b64
   b64="$(cat "$b64file")"
   local tmp="$WORK_DIR/mw-${cluster}.yaml"
-  cat >"$tmp" <<EOF
+
+  # Drop legacy split Proxy ManifestWork from older chart revisions (same Proxy field, unordered vs bundle).
+  oc delete manifestwork "${MANIFEST_WORK_PROXY_NAME}" -n "${cluster}" --ignore-not-found
+
+  if manifestwork_proxy_patch_enabled; then
+    cat >"$tmp" <<EOF
+apiVersion: work.open-cluster-management.io/v1
+kind: ManifestWork
+metadata:
+  name: ${MANIFEST_WORK_NAME}
+  namespace: ${cluster}
+spec:
+  workload:
+    manifests:
+      - apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: ${CONFIG_MAP_NAME}
+          namespace: ${TARGET_NAMESPACE}
+        data:
+          ca-bundle.crt: "${b64}"
+      - apiVersion: config.openshift.io/v1
+        kind: Proxy
+        metadata:
+          name: cluster
+        spec:
+          trustedCA:
+            name: ${CONFIG_MAP_NAME}
+EOF
+    log "ManifestWork ${cluster}/${MANIFEST_WORK_NAME} apply (ConfigMap then Proxy trustedCA)"
+  else
+    cat >"$tmp" <<EOF
 apiVersion: work.open-cluster-management.io/v1
 kind: ManifestWork
 metadata:
@@ -294,34 +336,11 @@ spec:
         data:
           ca-bundle.crt: "${b64}"
 EOF
+    log "ManifestWork ${cluster}/${MANIFEST_WORK_NAME} apply (ConfigMap only)"
+  fi
   # Server-side apply: client-side apply would set last-applied-configuration to the full
   # ManifestWork YAML and exceed metadata.annotations size limits (~256KiB) for large bundles.
-  oc apply --server-side --field-manager=vp-manage-proxy-cluster-ca -f "$tmp"
-  log "ManifestWork ${cluster}/${MANIFEST_WORK_NAME} applied (ConfigMap)"
-}
-
-apply_manifestwork_proxy() {
-  local cluster="$1"
-  local tmp="$WORK_DIR/mw-proxy-${cluster}.yaml"
-  cat >"$tmp" <<EOF
-apiVersion: work.open-cluster-management.io/v1
-kind: ManifestWork
-metadata:
-  name: ${MANIFEST_WORK_PROXY_NAME}
-  namespace: ${cluster}
-spec:
-  workload:
-    manifests:
-      - apiVersion: config.openshift.io/v1
-        kind: Proxy
-        metadata:
-          name: cluster
-        spec:
-          trustedCA:
-            name: ${CONFIG_MAP_NAME}
-EOF
-  oc apply --server-side --field-manager=vp-manage-proxy-cluster-ca -f "$tmp"
-  log "ManifestWork ${cluster}/${MANIFEST_WORK_PROXY_NAME} applied (Proxy trustedCA)"
+  oc apply --server-side --force-conflicts --field-manager=vp-manage-proxy-cluster-ca -f "$tmp"
 }
 
 rm -rf "$RAW_DIR" "$PEM_DIR"
@@ -441,10 +460,7 @@ for cluster in "${CLUSTERS[@]}"; do
       log "skip ManifestWork for local-cluster (hub ConfigMap and Proxy already applied in-cluster)"
       continue
     fi
-    apply_manifestwork_bundle "$cluster" "$BUNDLE_OUT"
-    if [[ "$MANIFESTWORK_PATCH_CLUSTER_PROXY" == "true" ]]; then
-      apply_manifestwork_proxy "$cluster"
-    fi
+    apply_manifestwork_spoke_rollout "$cluster" "$BUNDLE_OUT"
   else
     kc_path=""
     if ! kc_path="$(write_spoke_kubeconfig "$cluster")"; then

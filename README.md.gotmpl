@@ -7,6 +7,12 @@
 
 ## Overview
 
+### Distribution to managed clusters (defaults)
+
+The default path is **`distributeToSpokes: manifestwork`**: the gather **CronJob/Job** lists hub **ManagedCluster** objects (respecting **`managedClusterLabelSelector`** and **`excludeManagedClusters`**), then applies **ManifestWork** in each cluster namespace so the **work agent** reconciles the merged **ConfigMap** and (unless disabled) **`Proxy/cluster` `trustedCA`**. That is the chart’s primary “distribute to spokes” behavior. **ManifestWork for the managed cluster name `local-cluster` is skipped** because the hub copy is already applied in-cluster.
+
+**`policy.enabled`** drives a **separate** ACM **Policy** / **Placement** / **PlacementBinding** pipeline. Hub **Policy** status (for example empty compliance when placement selects zero clusters) does **not** indicate whether ManifestWork already delivered the bundle—use **ManifestWork** status and spoke **ConfigMap**/**Proxy** to confirm rollout.
+
 Helm chart for the **hub** cluster (OpenShift + ACM). It periodically aggregates PEM material from:
 
 - the hub: `ConfigMap/openshift-config-managed/trusted-ca-bundle` (`ca-bundle.crt`), and optionally the ingress `router-ca` secret;
@@ -15,9 +21,9 @@ Helm chart for the **hub** cluster (OpenShift + ACM). It periodically aggregates
   - **`acm`**: `ManagedCluster.spec.managedClusterClientConfigs[].caBundle` on the hub (API trust only; does not mirror each spoke’s full `trusted-ca-bundle`).
   - **`spokeTrustedCaBundle`**: full spoke `openshift-config-managed/trusted-ca-bundle` via ACM import kubeconfig ([opp-policy-chart](https://github.com/validatedpatterns/opp-policy-chart)-style).
 
-Certificates are **split and de-duplicated** by SHA-256 certificate fingerprint, then written to a single `ConfigMap` (`ca-bundle.crt`) in `openshift-config`. On the hub the job applies the ConfigMap and patches **`Proxy/cluster`**. On spokes (defaults) it applies **`ManifestWork`** objects in each managed cluster namespace so the **work agent** applies the same ConfigMap (and optionally a second ManifestWork for `Proxy` `trustedCA`) — still **no kubeconfig** in the chart or job for rollout. Set `distributeToSpokes: kubeconfig` to push via import secrets instead.
+Certificates are **split and de-duplicated** by SHA-256 certificate fingerprint, then written to a single `ConfigMap` (`ca-bundle.crt`) in `openshift-config`. On the hub the job applies the ConfigMap and patches **`Proxy/cluster`**. On spokes (defaults) it applies one **`ManifestWork`** per cluster (ConfigMap, then **`Proxy` `trustedCA`** in the same manifest list when **`manifestWork.patchClusterProxy`** is true) so ordering is deterministic — still **no kubeconfig** in the chart or job for rollout. Set `distributeToSpokes: kubeconfig` to push via import secrets instead.
 
-Optional **`additionalCaBundles`** in `values.yaml` are merged before de-duplication (see `values.yaml` for Vault-on-hub vs off-hub notes and a commented PEM example). ACM **Policy** + **PlacementBinding** are **on by default** (`policy.enabled`) to enforce `Proxy` `trustedCA`. When **`policy.createPlacement`** is **true** (default), the chart also applies **`ManagedClusterSetBinding`**(s) plus a **`Placement`** that selects **`policy.placement.clusterSets`** (default **`global`**, the usual ACM default set for all clusters). Set **`policy.createPlacement: false`** and supply your own **Placement** + bindings if needed. Set **`policy.enabled: false`** or align **`manifestWork.patchClusterProxy`** with your governance if Policy alone should own Proxy. If **`Placement`** reports **`PlacementSatisfied: False`** with reason **`NoIntersection`**, no **`ManagedClusterSetBinding`** in that Placement’s namespace projects your cluster sets (for example **`global`**): confirm **`oc get managedclustersetbinding -n <workspace>`** in the same namespace as **`oc get placement -n <workspace>`** (workspace is **`policy.placementRef.namespace`** if set, otherwise **`policy.hubNamespace`**).
+Optional **`additionalCaBundles`** in `values.yaml` are merged before de-duplication (see `values.yaml` for Vault-on-hub vs off-hub notes and a commented PEM example). **`policy.enabled`** (default **true**) adds ACM **Policy** + **PlacementBinding** so governance can mirror **`Proxy` `trustedCA`**; **`policy.createPlacement`** (default **true**) also applies **`ManagedClusterSetBinding`**(s) and **`Placement`** for **`policy.placement.clusterSets`** (default **`global`**). Turn **`policy.enabled`** off if you only want ManifestWork rollout, or set **`policy.createPlacement: false`** and supply your own **Placement** + bindings. **Placement troubleshooting** (for example **`NoIntersection`**, hub **Policy** with empty compliance while placement selects zero clusters): same-namespace **`ManagedClusterSetBinding`** as **Placement**, **`policy.placement.clusterSets`** membership, and workspace **`policy.placementRef.namespace`** / **`policy.hubNamespace`**—see the **Hub cluster group — `namespaces`** table later in this document.
 
 Defaults (**`spokePush`** + **`manifestwork`** + **`manifestWork.patchClusterProxy: true`**) avoid **kubeconfig files** in Git or in the gather pod for rollout; **`spokeTrustedCaBundle`** or **`distributeToSpokes: kubeconfig`** still read ACM import **kubeconfig Secrets on the hub** at runtime.
 
@@ -235,11 +241,11 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 | `managedClusterCaSource` | `spokePush` (default): per-spoke `trusted-ca-bundle` pushed to hub. Or `acm` (API CA only), `spokeTrustedCaBundle` (import kubeconfig). Set `spokePush.hubApiServer` if spokes cannot use the gather pod’s API URL. |
 | `spokePush.*` | Hub namespace, spoke sync namespace, CronJob schedule, token duration, optional hub API override (`hubApiServer`). |
 | `distributeToSpokes` | `manifestwork` (default): `ManifestWork` in each cluster namespace. `kubeconfig`: apply/patch via import kubeconfig. |
-| `manifestWork.patchClusterProxy` | Second ManifestWork for `Proxy` trustedCA (default true; set false if Policy owns Proxy). |
+| `manifestWork.patchClusterProxy` | Adds `Proxy/cluster` `trustedCA` to the **same** spoke ManifestWork as the bundle (default true; set false if Policy or another process owns Proxy on spokes). |
 | `additionalCaBundles` | List of PEM strings appended before de-duplication. |
 | `includeIngressCA` | Hub: `router-ca` when true. Spokes: `spokeTrustedCaBundle` (pull) or `spokePush` (push script appends ingress PEMs). |
 | `cronJob` / `syncJob` | Scheduled refresh vs one-shot post-install/upgrade Job. |
-| `policy` | Default **enabled**: ACM Policy + PlacementBinding for `Proxy` `trustedCA`. With **`policy.createPlacement`**, also **Placement** + **ManagedClusterSetBinding** (default **`placement.clusterSets: [global]`**). |
+| `policy` | Default **enabled**: ACM Policy + PlacementBinding (GRC mirror for `Proxy` `trustedCA`; does **not** gate **ManifestWork**). With **`policy.createPlacement`**, also **Placement** + **ManagedClusterSetBinding** (default **`placement.clusterSets: [global]`**). |
 
 ## References
 

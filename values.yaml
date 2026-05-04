@@ -57,8 +57,8 @@ spokePush:
   # Optional override for hub API URL in spoke kubeconfig; empty uses gather pod cluster server + CA.
   hubApiServer: ""
 
-# How to push the merged bundle + Proxy patch to spokes:
-# - manifestwork: create/update ManifestWork in each managed cluster namespace (no kubeconfig).
+# Primary spoke distribution (default: all ManagedClusters except excludeManagedClusters; hub job lists clusters).
+# - manifestwork: create/update ManifestWork in each managed cluster namespace (no kubeconfig). Independent of ACM Policy.
 # - kubeconfig: use ACM import secret kubeconfigs (same as opp-policy-chart retrieval pattern).
 distributeToSpokes: manifestwork
 
@@ -66,7 +66,9 @@ distributeToSpokes: manifestwork
 manifestWork:
   nameOverride: ""
   proxyNameOverride: ""
-  # Second ManifestWork that sets Proxy/cluster spec.trustedCA (disable if you enforce Proxy only via ACM Policy).
+  # Spokes should match the hub: set Proxy/cluster trustedCA to the merged bundle ConfigMap (default true).
+  # Renders as the second manifest in the same ManifestWork as the bundle (strict apply order).
+  # Legacy standalone Proxy ManifestWork name is MANIFEST_WORK_PROXY_NAME for delete-on-upgrade cleanup.
   patchClusterProxy: true
 
 includeIngressCA: true
@@ -124,11 +126,13 @@ clusterReadinessSleepSeconds: 30
 # PEM blocks are merged into the bundle before de-duplication (each list entry is one or more certs).
 additionalCaBundles: []
 
-# ACM Policy + PlacementBinding: enforce cluster Proxy trustedCA on selected clusters (default on).
+# ACM Policy + PlacementBinding: optional governance path for Proxy trustedCA (default on).
+# Does not gate ManifestWork; if Placement selects zero clusters, spokes can still receive the bundle via MW.
 # The Job/CronJob still owns ConfigMap content; Policy keeps Proxy wired to that ConfigMap name.
 # When policy.createPlacement is true, the chart also applies ManagedClusterSetBinding(s) + Placement
 # so the default Placement selects clusters (default cluster set "global"). Set createPlacement false
 # if you manage Placement and bindings yourself.
+# Hub Policy status.complianceState stays empty while Placement selects zero clusters (propagator behavior).
 policy:
   enabled: true
   # Base namespace for ACM policy workspace when placementRef.namespace is empty.

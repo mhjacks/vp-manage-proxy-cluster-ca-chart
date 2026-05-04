@@ -1,15 +1,13 @@
 apiVersion: v2
 name: vp-manage-proxy-cluster-ca
 description: >-
-  Hub-side chart for OpenShift with ACM. Aggregates trusted CA PEMs from the hub
-  and managed clusters (default: spoke push + hub ingress), de-duplicates them,
-  materializes a cluster-wide ConfigMap for Proxy trustedCA, and applies the same
-  bundle to spokes via ManifestWork. ACM Policy + PlacementBinding are enabled by
-  default to enforce Proxy trustedCA; optional default Placement selects the
-  global ManagedClusterSet. Override policy.placementRef or disable policy.enabled
-  as needed.
+  Hub-side chart for OpenShift with ACM. By default it distributes a merged CA bundle
+  to every ManagedCluster via ManifestWork (spoke push + hub ingress, then gather job),
+  including Proxy/cluster trustedCA on spokes unless explicitly turned off.
+  ACM Policy + PlacementBinding optionally mirror Proxy trustedCA through governance;
+  they do not gate ManifestWork rollout. Override policy.* or excludeManagedClusters as needed.
 type: application
-version: 0.1.0
+version: 0.1.2
 keywords:
   - openshift
   - acm
@@ -17,3 +15,4 @@ keywords:
   - tls
   - validated-patterns
   - policy
+  - manifestwork
