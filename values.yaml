@@ -50,7 +50,7 @@ managedClusterCaSource: spokePush
 spokePush:
   hubNamespace: vp-proxy-ca-bundles
   spokeNamespace: vp-proxy-ca-sync
-  schedule: "15 */6 * * *"
+  schedule: "*/10 * * * *"
   manifestWorkNameOverride: ""
   # Max duration for hub tokens embedded in spoke push Secrets (oc create token --duration).
   tokenDuration: 720h

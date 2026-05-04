@@ -95,7 +95,7 @@ Tune **`managedClusterLabelSelector`** so only clusters in your pattern (or Clus
 | spokePush.hubApiServer | string | `""` |  |
 | spokePush.hubNamespace | string | `"vp-proxy-ca-bundles"` |  |
 | spokePush.manifestWorkNameOverride | string | `""` |  |
-| spokePush.schedule | string | `"15 */6 * * *"` |  |
+| spokePush.schedule | string | `"*/10 * * * *"` |  |
 | spokePush.spokeNamespace | string | `"vp-proxy-ca-sync"` |  |
 | spokePush.tokenDuration | string | `"720h"` |  |
 | syncJob.enabled | bool | `true` |  |
