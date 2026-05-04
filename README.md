@@ -11,7 +11,42 @@ Hub-side chart for OpenShift. With ACM (default), distributes a merged CA bundle
 
 > **GitOps — `ManagedClusterSetBinding` / `global`:** This chart defaults to **`policy.createManagedClusterSetBindings: false`**, so it does **not** render **`ManagedClusterSetBinding`**. Argo CD often shows **`global` “disappearing”** when **two Applications** (or ACM plus this chart) both try to own the same **`ManagedClusterSetBinding`** name in the same namespace: sync replaces or prunes the object. **Pick one writer:** keep **`ManagedClusterSetBinding`** for **`global`** (and your other **`policy.placement.clusterSets`**) in a **platform / ACM** Application, and leave this chart to **`Placement`**, **`Policy`**, and **`PlacementBinding`** only. Set **`policy.createManagedClusterSetBindings: true`** only on hubs where **nothing else** creates those bindings. Chart-created bindings still carry **`helm.sh/resource-policy: keep`** when enabled.
 
-> **GitOps — Argo CD and hub `Policy.status`:** The governance propagator updates **`Policy.status`** on the hub after sync. Argo CD often reports **OutOfSync** if the rendered manifest omits that subtree. On the **Application** that installs this chart, add **`ignoreDifferences`** for **`policy.open-cluster-management.io` / `Policy`** with **`jqPathExpressions: ['.status']`** (or equivalent) so Argo compares only **spec** while ACM owns **status**. This does not change spoke behavior.
+### GitOps — Argo CD `OutOfSync` and `ignoreDifferences`
+
+The gather job **server-side applies** the merged CA **`ConfigMap`** (key **`ca-bundle.crt`**) and patches **`Proxy/cluster`**. ACM updates **`Policy.status`**. Those live fields often differ from what Helm rendered, so Argo CD reports **OutOfSync** until **`spec.ignoreDifferences`** on the **Application** matches how jq / JSON pointers address those paths.
+
+**`ca-bundle.crt` and jq:** In **`jqPathExpressions`**, a path like **`.data.ca-bundle.crt`** is **wrong**: jq treats the dots as nested object keys (`.data.ca`, then `bundle`, …), **not** as the single key **`ca-bundle.crt`**. Use **bracket form**: **`.data["ca-bundle.crt"]`**. Alternatively use **`jsonPointers`** (RFC 6901), where each **`/`** starts a new segment, so **`/data/ca-bundle.crt`** is correct—the literal key is one segment.
+
+**Per-resource annotations:** Relying on an **`argocd.argoproj.io/ignore-differences`**-style annotation on a resource is **not** consistently implemented across Argo CD versions; prefer **`spec.ignoreDifferences`** on the **Application** (or parent ApplicationSet).
+
+**Sync stage:** If Argo still overwrites ignored fields during sync, enable sync option **`RespectIgnoreDifferences=true`** so ignored paths are stripped from the desired manifest before apply (see [Argo CD diffing](https://argo-cd.readthedocs.io/en/stable/user-guide/diffing/) and sync options).
+
+**Example** (adjust **`name`** / **`namespace`** to **`configMapName`** / **`namespace`** from this chart’s values):
+
+```yaml
+spec:
+  syncPolicy:
+    syncOptions:
+      - RespectIgnoreDifferences=true
+  ignoreDifferences:
+    - group: policy.open-cluster-management.io
+      kind: Policy
+      jqPathExpressions:
+        - .status
+    - group: ""
+      kind: ConfigMap
+      name: vp-pattern-proxy-ca-bundle
+      namespace: openshift-config
+      jqPathExpressions:
+        - .data["ca-bundle.crt"]
+    - group: config.openshift.io
+      kind: Proxy
+      name: cluster
+      jqPathExpressions:
+        - .status
+```
+
+Use the **`ConfigMap`** entry only if that object is **declared in the same Application** (this chart’s templates do **not** emit the merged bundle `ConfigMap`; the job creates it). **`Policy`** and live **`Proxy`** are the usual sources of drift when the snippet above is misconfigured.
 
 ### Hub-only (`acm.enabled: false`)
 
