@@ -5,9 +5,9 @@ description: >-
   and managed clusters (default: spoke push + hub ingress), de-duplicates them,
   materializes a cluster-wide ConfigMap for Proxy trustedCA, and applies the same
   bundle to spokes via ManifestWork. ACM Policy + PlacementBinding are enabled by
-  default to enforce Proxy trustedCA on the Placement's clusters; override
-  policy.placementRef to an existing Placement or disable policy.enabled until one
-  exists.
+  default to enforce Proxy trustedCA; optional default Placement selects the
+  global ManagedClusterSet. Override policy.placementRef or disable policy.enabled
+  as needed.
 type: application
 version: 0.1.0
 keywords:

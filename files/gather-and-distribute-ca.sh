@@ -240,7 +240,8 @@ apply_ca_configmap() {
   fi
   oc "${args[@]}" create configmap "$CONFIG_MAP_NAME" -n "$TARGET_NAMESPACE" \
     --from-file=ca-bundle.crt="$bundle" \
-    --dry-run=client -o yaml | oc "${args[@]}" apply --server-side --field-manager=vp-manage-proxy-cluster-ca -f -
+    --dry-run=client -o yaml | oc "${args[@]}" apply --server-side --force-conflicts \
+    --field-manager=vp-manage-proxy-cluster-ca -f -
   log "ConfigMap ${TARGET_NAMESPACE}/${CONFIG_MAP_NAME} applied on ${label}"
 }
 
@@ -433,6 +434,13 @@ for cluster in "${CLUSTERS[@]}"; do
     continue
   fi
   if [[ "$DISTRIBUTE_TO_SPOKES" == "manifestwork" ]]; then
+    # Hub is already updated above; ACM uses ManagedCluster "local-cluster" for the hub.
+    # ManifestWork in local-cluster would make work-agent apply the same openshift-config
+    # ConfigMap and Proxy, causing SSA conflicts with this job's apply_ca_configmap/patch_proxy.
+    if [[ "$cluster" == "local-cluster" ]]; then
+      log "skip ManifestWork for local-cluster (hub ConfigMap and Proxy already applied in-cluster)"
+      continue
+    fi
     apply_manifestwork_bundle "$cluster" "$BUNDLE_OUT"
     if [[ "$MANIFESTWORK_PATCH_CLUSTER_PROXY" == "true" ]]; then
       apply_manifestwork_proxy "$cluster"

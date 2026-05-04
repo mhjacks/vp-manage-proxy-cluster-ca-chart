@@ -126,17 +126,24 @@ additionalCaBundles: []
 
 # ACM Policy + PlacementBinding: enforce cluster Proxy trustedCA on selected clusters (default on).
 # The Job/CronJob still owns ConfigMap content; Policy keeps Proxy wired to that ConfigMap name.
-# Ensure a Placement named placementRef.name exists in hubNamespace (or override both), or set
-# policy.enabled false until it does.
+# When policy.createPlacement is true, the chart also applies ManagedClusterSetBinding(s) + Placement
+# so the default Placement selects clusters (default cluster set "global"). Set createPlacement false
+# if you manage Placement and bindings yourself.
 policy:
   enabled: true
   hubNamespace: open-cluster-management
   name: ""
+  createPlacement: true
   placementRef:
-    # Default matches a Placement you can create for this chart; override to your cluster set.
+    # Default Placement name created when policy.createPlacement is true; override if you use your own Placement.
     name: vp-proxy-ca
     # Defaults to hubNamespace when empty (Placement lives in the binding namespace).
     namespace: ""
+  placement:
+    # ManagedClusterSets to bind into hubNamespace and to select from (requires clusters to be members of these sets).
+    # Default "global" is the ACM default set that contains all managed clusters on typical installs.
+    clusterSets:
+      - global
 
 resources:
   requests:

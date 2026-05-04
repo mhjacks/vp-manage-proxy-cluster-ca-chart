@@ -1,0 +1,32 @@
+{{- if and .Values.policy.enabled .Values.policy.createPlacement .Values.policy.placementRef.name }}
+{{- $ns := .Values.policy.hubNamespace }}
+{{- $placementName := .Values.policy.placementRef.name }}
+{{- $clusterSets := .Values.policy.placement.clusterSets | default (list "global") }}
+{{- range $clusterSets }}
+---
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: {{ . | quote }}
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: {{ include "vpProxyCa.name" $ }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+spec:
+  clusterSet: {{ . | quote }}
+{{- end }}
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: {{ $placementName | quote }}
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  clusterSets:
+{{- range $clusterSets }}
+    - {{ . | quote }}
+{{- end }}
+{{- end }}

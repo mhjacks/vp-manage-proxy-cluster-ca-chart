@@ -2,7 +2,7 @@
 
 ![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
 
-Hub-side chart for OpenShift with ACM. Aggregates trusted CA PEMs from the hub and managed clusters (default: spoke push + hub ingress), de-duplicates them, materializes a cluster-wide ConfigMap for Proxy trustedCA, and applies the same bundle to spokes via ManifestWork. ACM Policy + PlacementBinding are enabled by default to enforce Proxy trustedCA on the Placement's clusters; override policy.placementRef to an existing Placement or disable policy.enabled until one exists.
+Hub-side chart for OpenShift with ACM. Aggregates trusted CA PEMs from the hub and managed clusters (default: spoke push + hub ingress), de-duplicates them, materializes a cluster-wide ConfigMap for Proxy trustedCA, and applies the same bundle to spokes via ManifestWork. ACM Policy + PlacementBinding are enabled by default to enforce Proxy trustedCA; optional default Placement selects the global ManagedClusterSet. Override policy.placementRef or disable policy.enabled as needed.
 
 ## Overview
 
@@ -16,7 +16,7 @@ Helm chart for the **hub** cluster (OpenShift + ACM). It periodically aggregates
 
 Certificates are **split and de-duplicated** by SHA-256 certificate fingerprint, then written to a single `ConfigMap` (`ca-bundle.crt`) in `openshift-config`. On the hub the job applies the ConfigMap and patches **`Proxy/cluster`**. On spokes (defaults) it applies **`ManifestWork`** objects in each managed cluster namespace so the **work agent** applies the same ConfigMap (and optionally a second ManifestWork for `Proxy` `trustedCA`) — still **no kubeconfig** in the chart or job for rollout. Set `distributeToSpokes: kubeconfig` to push via import secrets instead.
 
-Optional **`additionalCaBundles`** in `values.yaml` are merged before de-duplication (see `values.yaml` for Vault-on-hub vs off-hub notes and a commented PEM example). ACM **Policy** + **PlacementBinding** are **on by default** (`policy.enabled`) to enforce `Proxy` `trustedCA`; ensure `policy.placementRef.name` names an existing **Placement** (default `vp-proxy-ca`) or override it. Set `policy.enabled: false` or align `manifestWork.patchClusterProxy` with your governance if Policy alone should own Proxy.
+Optional **`additionalCaBundles`** in `values.yaml` are merged before de-duplication (see `values.yaml` for Vault-on-hub vs off-hub notes and a commented PEM example). ACM **Policy** + **PlacementBinding** are **on by default** (`policy.enabled`) to enforce `Proxy` `trustedCA`. When **`policy.createPlacement`** is **true** (default), the chart also applies **`ManagedClusterSetBinding`**(s) plus a **`Placement`** that selects **`policy.placement.clusterSets`** (default **`global`**, the usual ACM default set for all clusters). Set **`policy.createPlacement: false`** and supply your own **Placement** + bindings if needed. Set **`policy.enabled: false`** or align **`manifestWork.patchClusterProxy`** with your governance if Policy alone should own Proxy.
 
 Defaults (**`spokePush`** + **`manifestwork`** + **`manifestWork.patchClusterProxy: true`**) avoid **kubeconfig files** in Git or in the gather pod for rollout; **`spokeTrustedCaBundle`** or **`distributeToSpokes: kubeconfig`** still read ACM import **kubeconfig Secrets on the hub** at runtime.
 
@@ -238,7 +238,7 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 | `additionalCaBundles` | List of PEM strings appended before de-duplication. |
 | `includeIngressCA` | Hub: `router-ca` when true. Spokes: `spokeTrustedCaBundle` (pull) or `spokePush` (push script appends ingress PEMs). |
 | `cronJob` / `syncJob` | Scheduled refresh vs one-shot post-install/upgrade Job. |
-| `policy` | Default **enabled**: ACM Policy + PlacementBinding for `Proxy` `trustedCA`. Default `placementRef.name` is `vp-proxy-ca` (create that Placement or override). |
+| `policy` | Default **enabled**: ACM Policy + PlacementBinding for `Proxy` `trustedCA`. With **`policy.createPlacement`**, also **Placement** + **ManagedClusterSetBinding** (default **`placement.clusterSets: [global]`**). |
 
 ## References
 
@@ -275,13 +275,15 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 | manifestWork.proxyNameOverride | string | `""` |  |
 | nameOverride | string | `""` |  |
 | namespace | string | `"openshift-config"` |  |
+| podSecurityContext.runAsGroup | int | `0` |  |
 | podSecurityContext.runAsNonRoot | bool | `true` |  |
-| podSecurityContext.runAsUser | int | `1000690001` | Numeric UID required with `runAsNonRoot` when the image USER is non-numeric; must fit the namespace SCC UID range. |
-| podSecurityContext.runAsGroup | int | `0` | Typical OpenShift arbitrary-UID pattern (root group) for reading image files. |
+| podSecurityContext.runAsUser | int | `1000690001` |  |
 | podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
+| policy.createPlacement | bool | `true` |  |
 | policy.enabled | bool | `true` |  |
 | policy.hubNamespace | string | `"open-cluster-management"` |  |
 | policy.name | string | `""` |  |
+| policy.placement.clusterSets[0] | string | `"global"` |  |
 | policy.placementRef.name | string | `"vp-proxy-ca"` |  |
 | policy.placementRef.namespace | string | `""` |  |
 | resources.limits.cpu | string | `"1"` |  |
