@@ -3,13 +3,15 @@
 
 ![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
 
-Hub-side chart for OpenShift with ACM. By default it distributes a merged CA bundle to every ManagedCluster via ManifestWork (spoke push + hub ingress, then gather job), including Proxy/cluster trustedCA on spokes unless explicitly turned off. ACM Policy + PlacementBinding (default on) add Governance console visibility for Proxy trustedCA vs the merged bundle ConfigMap; they do not gate ManifestWork rollout. Override policy.* or excludeManagedClusters as needed.
+Hub-side chart for OpenShift with ACM. By default it distributes a merged CA bundle to every ManagedCluster via ManifestWork (spoke push + hub ingress, then gather job), including Proxy/cluster trustedCA on spokes unless explicitly turned off. ACM Policy + PlacementBinding (default on) add Governance visibility for Proxy trustedCA vs the merged bundle ConfigMap with default inform remediation (no fight with ManifestWork); they do not gate rollout. Override policy.* or excludeManagedClusters as needed.
 
-**At a glance:** **ManifestWork** (default) rolls out the merged CA **ConfigMap** and **`Proxy/cluster` `trustedCA`** to spokes; **ACM Policy + PlacementBinding** (default **on**) add **Governance / GRC console visibility** for the same **`Proxy` `trustedCA` → `configMapName`** contract (they do **not** gate ManifestWork). Override **policy.*** or **excludeManagedClusters** as needed. See **Policy visibility in ACM** under Overview.
+**At a glance:** **ManifestWork** (default) rolls out the merged CA **ConfigMap** and **`Proxy/cluster` `trustedCA`** to spokes; **ACM Policy + PlacementBinding** (default **on**) add **Governance / GRC** compliance and **cluster violation** detail for the same **`Proxy` `trustedCA` → `configMapName`** contract using default **`policy.remediationAction: inform`** so ACM does **not** fight **ManifestWork** over **`Proxy`**. Override **policy.*** or **excludeManagedClusters** as needed. See **Policy visibility in ACM** under Overview.
 
 ## Overview
 
 > **GitOps — `ManagedClusterSetBinding` / `global`:** This chart defaults to **`policy.createManagedClusterSetBindings: false`**, so it does **not** render **`ManagedClusterSetBinding`**. Argo CD often shows **`global` “disappearing”** when **two Applications** (or ACM plus this chart) both try to own the same **`ManagedClusterSetBinding`** name in the same namespace: sync replaces or prunes the object. **Pick one writer:** keep **`ManagedClusterSetBinding`** for **`global`** (and your other **`policy.placement.clusterSets`**) in a **platform / ACM** Application, and leave this chart to **`Placement`**, **`Policy`**, and **`PlacementBinding`** only. Set **`policy.createManagedClusterSetBindings: true`** only on hubs where **nothing else** creates those bindings. Chart-created bindings still carry **`helm.sh/resource-policy: keep`** when enabled.
+
+> **GitOps — Argo CD and hub `Policy.status`:** The governance propagator updates **`Policy.status`** on the hub after sync. Argo CD often reports **OutOfSync** if the rendered manifest omits that subtree. On the **Application** that installs this chart, add **`ignoreDifferences`** for **`policy.open-cluster-management.io` / `Policy`** with **`jqPathExpressions: ['.status']`** (or equivalent) so Argo compares only **spec** while ACM owns **status**. This does not change spoke behavior.
 
 ### Injecting extra CA material (`additionalCaBundles`)
 
@@ -23,7 +25,7 @@ The default path is **`distributeToSpokes: manifestwork`**: the gather **CronJob
 
 ### Policy visibility in ACM (recommended)
 
-Keep **`policy.enabled: true`** (the default) when you want **ACM Governance / GRC** visibility into CA distribution outcomes: the hub **Policy** and **replicated policies** on each managed cluster surface **compliance** for **`Proxy/cluster`** **`spec.trustedCA.name`** matching **`configMapName`**—useful drift and history in the console beyond raw **ManifestWork** status. **ManifestWork** still applies the **ConfigMap** and (by default) the **Proxy** patch; **Policy** does **not** replace that rollout path—it **reports** whether spokes (and the intent encoded in **ConfigurationPolicy**) stay aligned with the bundle ConfigMap name the job maintains.
+Keep **`policy.enabled: true`** (the default) when you want **ACM Governance / GRC** visibility into CA distribution outcomes: the hub **Policy** and **replicated policies** on each managed cluster surface **compliance** (and **cluster violations** / NonCompliant detail, including **`policy.configurationCustomMessage`**) for **`Proxy/cluster`** **`spec.trustedCA.name`** matching **`configMapName`**. Default **`policy.remediationAction: inform`** means the policy engine **evaluates and reports** only—**ManifestWork** (by default) **applies** **`Proxy`** on spokes, so you get populated GRC columns **without** two controllers reconciling the same **`Proxy`**. Set **`policy.remediationAction: enforce`** only when **`manifestWork.patchClusterProxy`** is **false** or you intentionally want the policy controller to remediate **`Proxy`**.
 
 If **Placement** selects **zero** clusters, hub **Policy** compliance may stay empty while **ManifestWork** has still delivered the bundle—use **ManifestWork** / spoke **ConfigMap** as the rollout source of truth, and fix **Placement** + **`ManagedClusterSetBinding`** (see the **GitOps** callout) so **Policy** status populates for full visibility.
 
@@ -37,7 +39,7 @@ Helm chart for the **hub** cluster (OpenShift + ACM). It periodically aggregates
 
 Certificates are **split and de-duplicated** by SHA-256 certificate fingerprint, then written to a single `ConfigMap` (`ca-bundle.crt`) in `openshift-config`. On the hub the job applies the ConfigMap and patches **`Proxy/cluster`**. On spokes (defaults) it applies one **`ManifestWork`** per cluster (ConfigMap, then **`Proxy` `trustedCA`** in the same manifest list when **`manifestWork.patchClusterProxy`** is true) so ordering is deterministic — still **no kubeconfig** in the chart or job for rollout. Set `distributeToSpokes: kubeconfig` to push via import secrets instead.
 
-**`policy.enabled`** (default **true**) adds ACM **Policy** + **PlacementBinding**—**leave on** for console visibility unless another team owns the same **Proxy** **ConfigurationPolicy**. **`policy.createPlacement`** (default **true**) renders **`Placement`** for **`policy.placement.clusterSets`** (default **`global`**). **`policy.createManagedClusterSetBindings`** defaults to **`false`** so **`ManagedClusterSetBinding`** is not managed here—see the **GitOps** callout; ensure **`global`** is still bound in that workspace so **Placement** (and **Policy** status) stay healthy. Set **`policy.createPlacement: false`** only if you supply your own **Placement** + bindings. **Placement troubleshooting** (for example **`NoIntersection`**): same-namespace **`ManagedClusterSetBinding`** as **Placement**, **`policy.placement.clusterSets`** membership, and workspace **`policy.placementRef.namespace`** / **`policy.hubNamespace`**—see the **Hub cluster group — `namespaces`** table later in this document.
+**`policy.enabled`** (default **true**) adds ACM **Policy** + **PlacementBinding**—**leave on** for GRC compliance and violation columns unless another team owns the same **Proxy** **ConfigurationPolicy**. Default **`policy.remediationAction: inform`** avoids competing with **ManifestWork** on **`Proxy`**. **`policy.createPlacement`** (default **true**) renders **`Placement`** for **`policy.placement.clusterSets`** (default **`global`**). **`policy.createManagedClusterSetBindings`** defaults to **`false`**—see the **GitOps** callout; ensure **`global`** is still bound in that workspace so **Placement** (and **Policy** status) stay healthy. Set **`policy.createPlacement: false`** only if you supply your own **Placement** + bindings. **Placement troubleshooting** (for example **`NoIntersection`**): same-namespace **`ManagedClusterSetBinding`** as **Placement**, **`policy.placement.clusterSets`** membership, and workspace **`policy.placementRef.namespace`** / **`policy.hubNamespace`**—see the **Hub cluster group — `namespaces`** table later in this document.
 
 Defaults (**`spokePush`** + **`manifestwork`** + **`manifestWork.patchClusterProxy: true`**) avoid **kubeconfig files** in Git or in the gather pod for rollout; **`spokeTrustedCaBundle`** or **`distributeToSpokes: kubeconfig`** still read ACM import **kubeconfig Secrets on the hub** at runtime.
 
@@ -259,7 +261,7 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 | `additionalCaBundles` | **Inject** extra PEMs into the merged bundle (see **Injecting extra CA material** above); merged then fingerprint de-duplicated. |
 | `includeIngressCA` | Hub: `router-ca` when true. Spokes: `spokeTrustedCaBundle` (pull) or `spokePush` (push script appends ingress PEMs). |
 | `cronJob` / `syncJob` | Scheduled refresh vs one-shot post-install/upgrade Job. |
-| `policy` | Default **enabled**: ACM **Policy** + **PlacementBinding** for **GRC/console visibility** of **`Proxy` `trustedCA`** vs **`configMapName`** (does **not** gate **ManifestWork** rollout). With **`policy.createPlacement`**, **Placement** (default **`placement.clusterSets: [global]`**). **`createManagedClusterSetBindings`** defaults **false** (GitOps); set **true** to render **ManagedClusterSetBinding**. |
+| `policy` | Default **enabled**: ACM **Policy** + **PlacementBinding** for **GRC** compliance and **violations** vs **`configMapName`**. Default **`remediationAction: inform`** avoids fighting **ManifestWork** on **`Proxy`**; **`configurationCustomMessage`** improves violation text. **`createManagedClusterSetBindings`** defaults **false** (GitOps). |
 
 ## References
 
@@ -270,6 +272,7 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 
 - **ACM Policy name**: the governance webhook requires **`len(policy namespace) + len(policy name) <= 62`**. The chart default is **`vpca-<truncated Helm release name>`** when **`policy.name`** is empty. Remove stale **`Policy`** / **`PlacementBinding`** with the old long name after upgrade if needed.
 - **`policy.createManagedClusterSetBindings`** defaults to **`false`**: manage **`ManagedClusterSetBinding/global`** in a single platform Argo Application; set **`true`** only when this chart should own those objects.
+- **`policy.remediationAction`** defaults to **`inform`**: GRC shows compliance and violation detail while **ManifestWork** remains the default applier for spoke **`Proxy`**; use **`enforce`** only when you are not double-writing **`Proxy`** with **`manifestWork.patchClusterProxy: true`**.
 
 ## Values
 
@@ -303,15 +306,17 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 | podSecurityContext.runAsNonRoot | bool | `true` |  |
 | podSecurityContext.runAsUser | int | `1000690001` |  |
 | podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
+| policy.configurationCustomMessage | string | `"Proxy/cluster spec.trustedCA.name must match the merged CA bundle ConfigMap (see chart values.configMapName). When NonCompliant, fix ManifestWork rollout or gather output; this policy is inform-only by default so it does not apply Proxy."` | NonCompliant message in GRC / cluster violations detail (ConfigurationPolicy spec.customMessage). |
 | policy.createManagedClusterSetBindings | bool | `false` | When false (default), chart does not render ManagedClusterSetBinding; bind policy.placement.clusterSets in the policy workspace via a platform GitOps app. Set true if this chart should own those bindings. |
 | policy.createPlacement | bool | `true` |  |
-| policy.description | string | `"Ensures OpenShift Proxy/cluster spec.trustedCA.name matches the merged cluster-wide CA bundle ConfigMap (values.configMapName), with enforce remediation. Complements ManifestWork rollout from the same chart; use for drift visibility in the console."` | Shown in ACM Governance as policy description (annotation policy.open-cluster-management.io/description). |
+| policy.description | string | `"Ensures OpenShift Proxy/cluster spec.trustedCA.name matches the merged cluster-wide CA bundle ConfigMap (values.configMapName). Default remediation is inform so GRC shows compliance and cluster violations without competing with this chart's ManifestWork on the same Proxy object."` | Shown in ACM Governance as policy description (annotation policy.open-cluster-management.io/description). |
 | policy.enabled | bool | `true` | Enable ACM Policy + PlacementBinding for Governance/GRC console visibility of Proxy trustedCA vs configMapName (does not gate ManifestWork). |
 | policy.hubNamespace | string | `"open-cluster-management"` |  |
 | policy.name | string | `""` | Hub Policy metadata.name; empty uses vpca-<truncated Release.Name> so len(namespace)+len(name)<=62 (ACM webhook). |
 | policy.placement.clusterSets[0] | string | `"global"` |  |
 | policy.placementRef.name | string | `"vp-proxy-ca"` |  |
 | policy.placementRef.namespace | string | `""` |  |
+| policy.remediationAction | string | `"inform"` | inform (default): report compliance and violations in ACM; ManifestWork applies Proxy. enforce: policy controller also remediates Proxy—avoid with manifestWork.patchClusterProxy true unless you accept two writers. |
 | resources.limits.cpu | string | `"1"` |  |
 | resources.limits.memory | string | `"1Gi"` |  |
 | resources.requests.cpu | string | `"200m"` |  |

@@ -136,6 +136,8 @@ additionalCaBundles: []
 # ManagedClusterSetBinding is optional (policy.createManagedClusterSetBindings); default false for GitOps.
 # Set createPlacement false if you manage Placement yourself.
 # Hub Policy status.complianceState stays empty while Placement selects zero clusters (propagator behavior).
+# Default remediation is inform: GRC shows per-cluster compliance and violation detail without the policy
+# controller fighting ManifestWork over the same Proxy object. Use enforce only if ManifestWork does not patch Proxy.
 policy:
   # -- Enable ACM Policy + PlacementBinding for Governance/GRC console visibility of Proxy trustedCA vs configMapName (does not gate ManifestWork).
   enabled: true
@@ -146,8 +148,14 @@ policy:
   # -- Shown in ACM Governance as policy description (annotation policy.open-cluster-management.io/description).
   description: >-
     Ensures OpenShift Proxy/cluster spec.trustedCA.name matches the merged cluster-wide CA bundle
-    ConfigMap (values.configMapName), with enforce remediation. Complements ManifestWork rollout from
-    the same chart; use for drift visibility in the console.
+    ConfigMap (values.configMapName). Default remediation is inform so GRC shows compliance and cluster
+    violations without competing with this chart's ManifestWork on the same Proxy object.
+  # -- inform (default): report compliance and violations in ACM; ManifestWork applies Proxy. enforce: policy controller also remediates Proxy—avoid with manifestWork.patchClusterProxy true unless you accept two writers.
+  remediationAction: inform
+  # -- NonCompliant message in GRC / cluster violations detail (ConfigurationPolicy spec.customMessage).
+  configurationCustomMessage: >-
+    Proxy/cluster spec.trustedCA.name must match the merged CA bundle ConfigMap (see chart values.configMapName).
+    When NonCompliant, fix ManifestWork rollout or gather output; this policy is inform-only by default so it does not apply Proxy.
   createPlacement: true
   # -- When false (default), chart does not render ManagedClusterSetBinding; bind policy.placement.clusterSets in the policy workspace via a platform GitOps app. Set true if this chart should own those bindings.
   createManagedClusterSetBindings: false

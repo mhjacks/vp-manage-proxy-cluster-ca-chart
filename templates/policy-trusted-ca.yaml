@@ -2,6 +2,10 @@
 {{- fail "policy.enabled requires policy.placementRef.name (workspace namespace: policy.placementRef.namespace or policy.hubNamespace)" }}
 {{- end }}
 {{- if .Values.policy.enabled }}
+{{- $ra := .Values.policy.remediationAction | default "inform" | lower }}
+{{- if not (or (eq $ra "inform") (eq $ra "enforce")) }}
+{{- fail "policy.remediationAction must be inform or enforce" }}
+{{- end }}
 {{- $policyName := include "vpProxyCa.policyResourceName" . }}
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
@@ -15,7 +19,7 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   disabled: false
-  remediationAction: enforce
+  remediationAction: {{ $ra | quote }}
   policy-templates:
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
@@ -23,8 +27,9 @@ spec:
         metadata:
           name: {{ $policyName }}
         spec:
-          remediationAction: enforce
+          remediationAction: {{ $ra | quote }}
           severity: high
+          customMessage: {{ .Values.policy.configurationCustomMessage | quote }}
           object-templates:
             - complianceType: musthave
               objectDefinition:
