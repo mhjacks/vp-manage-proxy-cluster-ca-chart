@@ -290,7 +290,7 @@ spec:
         metadata:
           name: ${CONFIG_MAP_NAME}
           namespace: ${TARGET_NAMESPACE}
-        binaryData:
+        data:
           ca-bundle.crt: "${b64}"
 EOF
   # Server-side apply: client-side apply would set last-applied-configuration to the full
