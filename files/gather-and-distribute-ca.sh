@@ -240,7 +240,7 @@ apply_ca_configmap() {
   fi
   oc "${args[@]}" create configmap "$CONFIG_MAP_NAME" -n "$TARGET_NAMESPACE" \
     --from-file=ca-bundle.crt="$bundle" \
-    --dry-run=client -o yaml | oc "${args[@]}" apply -f -
+    --dry-run=client -o yaml | oc "${args[@]}" apply --server-side --field-manager=vp-manage-proxy-cluster-ca -f -
   log "ConfigMap ${TARGET_NAMESPACE}/${CONFIG_MAP_NAME} applied on ${label}"
 }
 
@@ -293,7 +293,9 @@ spec:
         binaryData:
           ca-bundle.crt: "${b64}"
 EOF
-  oc apply -f "$tmp"
+  # Server-side apply: client-side apply would set last-applied-configuration to the full
+  # ManifestWork YAML and exceed metadata.annotations size limits (~256KiB) for large bundles.
+  oc apply --server-side --field-manager=vp-manage-proxy-cluster-ca -f "$tmp"
   log "ManifestWork ${cluster}/${MANIFEST_WORK_NAME} applied (ConfigMap)"
 }
 
@@ -317,7 +319,7 @@ spec:
           trustedCA:
             name: ${CONFIG_MAP_NAME}
 EOF
-  oc apply -f "$tmp"
+  oc apply --server-side --field-manager=vp-manage-proxy-cluster-ca -f "$tmp"
   log "ManifestWork ${cluster}/${MANIFEST_WORK_PROXY_NAME} applied (Proxy trustedCA)"
 }
 
