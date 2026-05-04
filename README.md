@@ -276,6 +276,8 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 | nameOverride | string | `""` |  |
 | namespace | string | `"openshift-config"` |  |
 | podSecurityContext.runAsNonRoot | bool | `true` |  |
+| podSecurityContext.runAsUser | int | `1000690001` | Numeric UID required with `runAsNonRoot` when the image USER is non-numeric; must fit the namespace SCC UID range. |
+| podSecurityContext.runAsGroup | int | `0` | Typical OpenShift arbitrary-UID pattern (root group) for reading image files. |
 | podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | policy.enabled | bool | `true` |  |
 | policy.hubNamespace | string | `"open-cluster-management"` |  |

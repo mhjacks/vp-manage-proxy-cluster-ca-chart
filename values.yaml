@@ -146,8 +146,12 @@ resources:
     cpu: "1"
     memory: 1Gi
 
+# Pod-level security. runAsNonRoot requires a numeric runAsUser when the image USER is non-numeric (e.g. root).
+# runAsUser must fall within your namespace SCC UID range (oc get namespace <ns> -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.uid-range}').
 podSecurityContext:
   runAsNonRoot: true
+  runAsUser: 1000690001
+  runAsGroup: 0
   seccompProfile:
     type: RuntimeDefault
 
