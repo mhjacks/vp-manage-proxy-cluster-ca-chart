@@ -11,7 +11,7 @@ Helm chart for the **hub** cluster (OpenShift + ACM). It periodically aggregates
 
 - the hub: `ConfigMap/openshift-config-managed/trusted-ca-bundle` (`ca-bundle.crt`), and optionally the ingress `router-ca` secret;
 - each selected **ManagedCluster**:
-  - **`managedClusterCaSource: spokePush`** (default): a **ManifestWork** deploys a CronJob on each spoke that reads `trusted-ca-bundle` (and optional ingress CA) and **writes** `ConfigMap/bundle-<cluster>` into **`spokePush.hubNamespace`** on the hub using a short-lived **hub token** plus **API URL** and **CA PEM** in a Secret (**no kubeconfig file**; spokes use `oc --server` / `--token` / `--certificate-authority`). The gather job mints credentials and **reads every** `bundle-*` ConfigMap in that namespace (nothing in your Git repo).
+  - **`managedClusterCaSource: spokePush`** (default): a **ManifestWork** deploys a CronJob on each spoke that reads `trusted-ca-bundle` (and optional ingress CA) and **writes** `ConfigMap/bundle-<cluster>` into **`spokePush.hubNamespace`** on the hub using a short-lived **hub token** plus **API URL** and **CA PEM** in a Secret (**no kubeconfig file**; spokes use `oc --server` / `--token` / `--certificate-authority`). The gather job mints credentials and **reads every** `bundle-*` ConfigMap in that namespace (nothing in your Git repository).
   - **`acm`**: `ManagedCluster.spec.managedClusterClientConfigs[].caBundle` on the hub (API trust only; does not mirror each spoke’s full `trusted-ca-bundle`).
   - **`spokeTrustedCaBundle`**: full spoke `openshift-config-managed/trusted-ca-bundle` via ACM import kubeconfig ([opp-policy-chart](https://github.com/validatedpatterns/opp-policy-chart)-style).
 
@@ -21,11 +21,209 @@ Optional **`additionalCaBundles`** in `values.yaml` are merged before de-duplica
 
 Defaults (**`spokePush`** + **`manifestwork`** + **`manifestWork.patchClusterProxy: true`**) avoid **kubeconfig files** in Git or in the gather pod for rollout; **`spokeTrustedCaBundle`** or **`distributeToSpokes: kubeconfig`** still read ACM import **kubeconfig Secrets on the hub** at runtime.
 
+## Push and pull configuration options
+
+Configuration splits into two **independent** axes:
+
+1. **`managedClusterCaSource`** — how the hub **gather job** obtains per-cluster trust material before merge/de-duplication.
+2. **`distributeToSpokes`** — how the merged bundle (and optional `Proxy` patch) is **applied on each spoke** after the hub updates its own `ConfigMap`/`Proxy`.
+
+The hub always reads **hub-local** `openshift-config-managed/trusted-ca-bundle` (and optional ingress) with in-cluster credentials. `includeIngressCA` applies on the hub always; on spokes it is honored for **`spokePush`** (push script) and **`spokeTrustedCaBundle`** (pull via kubeconfig), but **not** for **`acm`** (the script skips spoke ingress in that mode).
+
+### How each `managedClusterCaSource` works
+
+```mermaid
+flowchart TB
+  subgraph spokePush["spokePush (default)"]
+    direction TB
+    SP_TC["Spoke: trusted-ca-bundle (+ optional ingress)"]
+    SP_CJ["Spoke CronJob (ManifestWork)"]
+    SP_HUBCM["Hub ConfigMap bundle-MCNAME"]
+    SP_TC --> SP_CJ
+    SP_CJ -->|"Push to hub API (token + server + CA in Secret; no kubeconfig file)"| SP_HUBCM
+  end
+```
+
+```mermaid
+flowchart LR
+  subgraph acm["acm"]
+    MC["Hub: ManagedCluster.spec.managedClusterClientConfigs[].caBundle"]
+    JOB1["Gather job (hub API only)"]
+    MC --> JOB1
+  end
+```
+
+```mermaid
+flowchart LR
+  subgraph stb["spokeTrustedCaBundle"]
+    IMP["Hub: import kubeconfig Secret in MC namespace"]
+    STB_JOB["Gather job"]
+    STB_API["Spoke trusted-ca-bundle ConfigMap"]
+    STB_JOB -->|"read kubeconfig"| IMP
+    STB_JOB -->|"oc pull from spoke API"| STB_API
+  end
+```
+
+### How each `distributeToSpokes` mode works
+
+After the merge, the job updates the hub, then for every selected `ManagedCluster`:
+
+```mermaid
+flowchart LR
+  subgraph mw["distributeToSpokes: manifestwork (default)"]
+    MJ["Gather job on hub"]
+    MWMW["ManifestWork in managed cluster namespace on hub"]
+    MWAG["Spoke: work agent applies manifests"]
+    MJ -->|"oc apply ManifestWork"| MWMW
+    MWMW --> MWAG
+  end
+```
+
+```mermaid
+flowchart LR
+  subgraph kc["distributeToSpokes: kubeconfig"]
+    KJ["Gather job on hub"]
+    KIMP["Import kubeconfig Secret"]
+    KAPI["Spoke ConfigMap + Proxy patch"]
+    KJ -->|"read kubeconfig"| KIMP
+    KJ -->|"oc apply / patch on spoke"| KAPI
+  end
+```
+
+### End-to-end: recommended default
+
+Hub gather periodically merges sources, writes `configMapName` in `targetNamespace`, patches hub `Proxy`, then rolls out to spokes **without** storing kubeconfigs in the chart or Git:
+
+```mermaid
+flowchart TB
+  subgraph spokes["Each managed cluster"]
+    S1["trusted-ca-bundle"]
+    S2["Push CronJob"]
+    S1 --> S2
+  end
+  subgraph hubns["Hub: spokePush.hubNamespace"]
+    B["bundle-* ConfigMaps"]
+  end
+  subgraph gather["Hub: values.namespace job"]
+    G["gather-and-distribute-ca.sh"]
+  end
+  subgraph hubcfg["Hub: openshift-config"]
+    HCM["merged ConfigMap"]
+    HPX["Proxy cluster"]
+  end
+  subgraph rollout["Hub: MC namespace each cluster"]
+    MW["ManifestWork objects"]
+  end
+  S2 -->|"push"| B
+  B --> G
+  G --> HCM
+  G --> HPX
+  G --> MW
+  MW -->|"ACM work agent"| SPOKEOUT["Each spoke: merged ConfigMap and optional Proxy"]
+```
+
+### Combination matrix
+
+| `managedClusterCaSource` | Spoke trust material | Hub gather uses import kubeconfig? | Notes |
+|-------------------------|----------------------|-----------------------------------|--------|
+| **`spokePush`** | Full platform bundle (+ optional ingress) pushed into **`spokePush.hubNamespace`** | **No** (reads `bundle-*` on hub) | Spokes use short-lived hub token + API URL + hub CA in a Secret; **`spokePush.hubApiServer`** if spokes cannot use the gather pod’s API URL. |
+| **`acm`** | API client CA only from **`ManagedCluster`** CR | **No** | Does not mirror each spoke’s full `trusted-ca-bundle`; **`includeIngressCA`** does not add per-spoke ingress CAs. |
+| **`spokeTrustedCaBundle`** | Full `trusted-ca-bundle` (+ optional ingress) pulled from each spoke | **Yes** | Same import Secret pattern as [opp-policy-chart](https://github.com/validatedpatterns/opp-policy-chart). |
+
+| `distributeToSpokes` | Rollout mechanism | Hub job uses import kubeconfig? |
+|------------------------|-------------------|--------------------------------|
+| **`manifestwork`** | `ManifestWork` in each managed-cluster namespace; work agent applies | **No** |
+| **`kubeconfig`** | `oc` against each spoke API using import kubeconfig | **Yes** |
+
+So **kubeconfig on the hub** is required when **either** axis is set to the kubeconfig/import path: `managedClusterCaSource: spokeTrustedCaBundle` **or** `distributeToSpokes: kubeconfig` (or both).
+
+### Values examples
+
+**Default (no kubeconfig for gather or rollout):** push bundles from spokes, distribute with `ManifestWork`.
+
+```yaml
+managedClusterCaSource: spokePush
+distributeToSpokes: manifestwork
+spokePush:
+  hubNamespace: vp-proxy-ca-bundles
+  spokeNamespace: vp-proxy-ca-sync
+  # hubApiServer: "https://api.hub.example.com:6443"   # if spokes cannot reach in-cluster API URL
+```
+
+**ACM API trust only, ManifestWork rollout** (lightweight; not a full spoke PKI mirror):
+
+```yaml
+managedClusterCaSource: acm
+distributeToSpokes: manifestwork
+includeIngressCA: true   # hub ingress only; spoke ingress not merged from spokes in this mode
+```
+
+**Pull full spoke bundles with import kubeconfig, rollout via work agent** (no kubeconfig for rollout step):
+
+```yaml
+managedClusterCaSource: spokeTrustedCaBundle
+distributeToSpokes: manifestwork
+includeIngressCA: true
+```
+
+**Push bundles from spokes, but apply merged bundle with `oc` + import kubeconfig** (e.g. environments where ManifestWork rollout is not desired):
+
+```yaml
+managedClusterCaSource: spokePush
+distributeToSpokes: kubeconfig
+```
+
+**All kubeconfig-driven gather and rollout** (closest to classic opp-policy-style `oc` against each spoke):
+
+```yaml
+managedClusterCaSource: spokeTrustedCaBundle
+distributeToSpokes: kubeconfig
+includeIngressCA: true
+```
+
+Tune **`managedClusterLabelSelector`** and **`excludeManagedClusters`** in all cases so the job only touches intended clusters.
+
 ## Install
 
 Target the hub API (in-cluster or kubeconfig). Install into a hub namespace that can run batch jobs (defaults to `openshift-config`, same as opp-policy’s extractor).
 
 Tune **`managedClusterLabelSelector`** so only clusters in your pattern (or ClusterSet labels) are included. **`excludeManagedClusters`** is empty by default so every ManagedCluster is included; set space-separated names (e.g. `local-cluster`) only if you must skip rollout for specific clusters.
+
+### Validated Patterns cluster groups (applications and namespaces)
+
+This chart is **hub-scoped** for GitOps: OpenShift GitOps should deploy it from the **hub** cluster group values file only (for example `values-hub.yaml`, depending on `main.clusterGroupName` in `values-global.yaml`). Spoke **push** workloads (`spokePush` CronJob, RBAC, and namespace **`spokePush.spokeNamespace`**) are applied by the hub job via **ManifestWork**, not by a second copy of this chart on managed clusters. See [ClusterGroup in values files](https://validatedpatterns.io/learn/clustergroup-in-values-files/) for how `applications`, `namespaces`, `projects`, and `managedClusterGroups` fit together.
+
+**Hub cluster group — `applications`**
+
+Add one Helm application whose `path` is the chart directory inside your pattern repository (adjust to match your layout). Set **`namespace`** to the Argo CD **destination** namespace for the release; it should match **`namespace`** in this chart’s values (default **`openshift-config`**) so the CronJob, Job, RBAC, and script `ConfigMap` land where the chart expects. **`project`** must be an OpenShift GitOps `AppProject` that allows that destination (patterns often use a project named `hub` or similar).
+
+```yaml
+# Example fragment for values-hub.yaml (keys vary slightly by pattern; align with your repository’s clustergroup schema)
+applications:
+  vp-manage-proxy-cluster-ca:
+    name: vp-manage-proxy-cluster-ca
+    namespace: openshift-config
+    # <chart location information>
+    # optional: extraValueFiles:
+    #   - /values-proxy-ca-hub.yaml
+```
+
+**Hub cluster group — `namespaces`**
+
+| Namespace | Typical action in cluster group | Why |
+|-----------|----------------------------------|-----|
+| **`openshift-config`** | Usually **omit** from “create” lists (platform namespace already exists). Ensure your GitOps **AppProject** allows deploying into it if that is the chart `namespace`. | Holds the gather CronJob/Job, merged `ConfigMap` (`configMapName`), and hub `Proxy` patch. |
+| **`spokePush.hubNamespace`** (default **`vp-proxy-ca-bundles`**) | **Optional** entry: the chart creates a `Namespace` object for it, but some patterns predeclare namespaces for labels, quotas, or project allowlists. | Per-cluster **`bundle-*`** ConfigMaps and hub-side spoke-push Secrets. |
+| **`policy.hubNamespace`** (default **`open-cluster-management`**) | Usually **omit** if your hub cluster group already installs ACM (that subscription creates the namespace). | ACM **Policy** and **PlacementBinding** when `policy.enabled` is true. |
+
+**Managed cluster groups (spokes) — `applications` and `namespaces`**
+
+| Item | Action |
+|------|--------|
+| **`applications`** | **Do not** add this chart to spoke `applications`. Spokes receive the push agent and namespace via **ManifestWork** from the hub. |
+| **`namespaces`** | **Optional**: include **`spokePush.spokeNamespace`** (default **`vp-proxy-ca-sync`**) if your pattern pre-creates spoke namespaces or enforces allowlists—otherwise the ManifestWork still creates/uses that namespace when the hub job reconciles. |
+
+If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: spokeTrustedCaBundle`**, no extra Validated Patterns **application** is required on spokes; the gather job still runs on the hub and uses ACM import **Secrets** in each managed-cluster namespace on the hub.
 
 ## Values highlights
 
