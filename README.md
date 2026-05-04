@@ -60,7 +60,7 @@ Tune **`managedClusterLabelSelector`** so only clusters in your pattern (or Clus
 | cronJob.concurrencyPolicy | string | `"Forbid"` |  |
 | cronJob.enabled | bool | `true` |  |
 | cronJob.failedJobsHistoryLimit | int | `3` |  |
-| cronJob.schedule | string | `"0 */6 * * *"` |  |
+| cronJob.schedule | string | `"*/10 * * * *"` |  |
 | cronJob.successfulJobsHistoryLimit | int | `1` |  |
 | cronJob.suspend | bool | `false` |  |
 | distributeToSpokes | string | `"manifestwork"` |  |

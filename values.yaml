@@ -23,7 +23,7 @@ serviceAccount:
 cronJob:
   enabled: true
   suspend: false
-  schedule: "0 */6 * * *"
+  schedule: "*/10 * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
