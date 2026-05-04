@@ -139,6 +139,9 @@ policy:
   hubNamespace: open-cluster-management
   name: ""
   createPlacement: true
+  # When false, do not render ManagedClusterSetBinding (avoid duplicate ownership with another GitOps app or ACM).
+  # Placement still references policy.placement.clusterSets; you must bind those sets into the policy workspace yourself.
+  createManagedClusterSetBindings: true
   placementRef:
     # Default Placement name created when policy.createPlacement is true; override if you use your own Placement.
     name: vp-proxy-ca

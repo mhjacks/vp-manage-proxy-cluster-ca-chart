@@ -7,7 +7,7 @@ description: >-
   ACM Policy + PlacementBinding optionally mirror Proxy trustedCA through governance;
   they do not gate ManifestWork rollout. Override policy.* or excludeManagedClusters as needed.
 type: application
-version: 0.1.2
+version: 0.1.0
 keywords:
   - openshift
   - acm

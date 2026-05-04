@@ -293,6 +293,8 @@ apply_manifestwork_spoke_rollout() {
   oc delete manifestwork "${MANIFEST_WORK_PROXY_NAME}" -n "${cluster}" --ignore-not-found
 
   if manifestwork_proxy_patch_enabled; then
+    # ServerSideApply for cluster Proxy: avoids ApplyConflict / ignored trustedCA when other actors
+    # (e.g. network/cluster operators) own other Proxy fields on the spoke.
     cat >"$tmp" <<EOF
 apiVersion: work.open-cluster-management.io/v1
 kind: ManifestWork
@@ -300,6 +302,15 @@ metadata:
   name: ${MANIFEST_WORK_NAME}
   namespace: ${cluster}
 spec:
+  manifestConfigs:
+    - resourceIdentifier:
+        group: config.openshift.io
+        resource: proxies
+        name: cluster
+      updateStrategy:
+        type: ServerSideApply
+        serverSideApply:
+          force: true
   workload:
     manifests:
       - apiVersion: v1

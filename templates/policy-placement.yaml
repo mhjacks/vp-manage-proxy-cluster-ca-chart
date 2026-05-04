@@ -2,6 +2,7 @@
 {{- $ns := include "vpProxyCa.policyWorkspaceNamespace" . }}
 {{- $placementName := .Values.policy.placementRef.name }}
 {{- $clusterSets := .Values.policy.placement.clusterSets | default (list "global") }}
+{{- if .Values.policy.createManagedClusterSetBindings }}
 {{- range $clusterSets }}
 ---
 apiVersion: cluster.open-cluster-management.io/v1beta2
@@ -9,11 +10,14 @@ kind: ManagedClusterSetBinding
 metadata:
   name: {{ . | quote }}
   namespace: {{ $ns }}
+  annotations:
+    helm.sh/resource-policy: keep
   labels:
     app.kubernetes.io/name: {{ include "vpProxyCa.name" $ }}
     app.kubernetes.io/instance: {{ $.Release.Name }}
 spec:
   clusterSet: {{ . | quote }}
+{{- end }}
 {{- end }}
 ---
 apiVersion: cluster.open-cluster-management.io/v1beta1
