@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 # Sourced by gather-and-distribute-ca.sh. Uses env: WORK_DIR, MANIFEST_WORK_PUSH_AGENT_NAME,
 # SPOKE_PUSH_SPOKE_NAMESPACE, SPOKE_PUSH_HUB_NAMESPACE, SPOKE_PUSH_CRON_SCHEDULE, PUSH_AGENT_IMAGE,
-# INCLUDE_INGRESS_CA, VP_SPOKE_PUSH_INCLUDE_DIR (default /includes/spoke-push).
+# INCLUDE_INGRESS_CA, INCLUDE_SYSTEM_TRUST_STORE, VP_SPOKE_PUSH_INCLUDE_DIR (default /includes/spoke-push).
 
 VP_SPOKE_PUSH_INCLUDE_DIR="${VP_SPOKE_PUSH_INCLUDE_DIR:-/includes/spoke-push}"
 
@@ -75,6 +75,7 @@ provision_spoke_push_manifestwork() {
       -e "s|@@CLUSTER_VALUE@@|${cluster}|g" \
       -e "s|@@HUB_NAMESPACE@@|${SPOKE_PUSH_HUB_NAMESPACE}|g" \
       -e "s|@@INCLUDE_INGRESS@@|${INCLUDE_INGRESS_CA}|g" \
+      -e "s|@@INCLUDE_SYSTEM_TRUST@@|${INCLUDE_SYSTEM_TRUST_STORE}|g" \
       "${idir}/cronjob.yaml" | vp_spoke_push_manifest_item_from_stdin
   } >"$out"
 

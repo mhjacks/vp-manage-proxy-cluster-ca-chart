@@ -1,4 +1,4 @@
-# Placeholders: @@SPOKE_NAMESPACE@@ @@PUSH_IMAGE@@ @@CRON_SCHEDULE@@ @@CLUSTER_VALUE@@ @@HUB_NAMESPACE@@ @@INCLUDE_INGRESS@@
+# Placeholders: @@SPOKE_NAMESPACE@@ @@PUSH_IMAGE@@ @@CRON_SCHEDULE@@ @@CLUSTER_VALUE@@ @@HUB_NAMESPACE@@ @@INCLUDE_INGRESS@@ @@INCLUDE_SYSTEM_TRUST@@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -27,6 +27,8 @@ spec:
                   value: "@@HUB_NAMESPACE@@"
                 - name: INCLUDE_INGRESS_CA
                   value: "@@INCLUDE_INGRESS@@"
+                - name: INCLUDE_SYSTEM_TRUST_STORE
+                  value: "@@INCLUDE_SYSTEM_TRUST@@"
               command:
                 - /bin/bash
                 - /scripts/run.sh

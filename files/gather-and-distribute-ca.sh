@@ -5,11 +5,10 @@
 #
 # Managed cluster CA sources:
 # - acm: ManagedCluster.spec.managedClusterClientConfigs[].caBundle plus, when import kubeconfig exists,
-#   spoke trusted-ca-bundle, kube-apiserver-server-ca (API), and optional ingress router-ca.
-# - spokeTrustedCaBundle: openshift-config-managed/trusted-ca-bundle, kube-apiserver-server-ca (API),
-#   and optional ingress via import kubeconfig.
-# - spokePush: each spoke CronJob merges trusted-ca-bundle, kube-apiserver-server-ca (or in-cluster API CA),
-#   optional router-ca (ingress), then pushes to hub ConfigMaps (bundle-<cluster>).
+#   spoke kube-apiserver-server-ca (API), optional ingress router-ca, and optional system trusted-ca-bundle.
+# - spokeTrustedCaBundle: kube-apiserver-server-ca (API), optional ingress, and optional system trust via import kubeconfig.
+# - spokePush: each spoke CronJob merges kube-apiserver-server-ca (or in-cluster API CA),
+#   optional router-ca (ingress), and optional system trust, then pushes to hub ConfigMaps (bundle-<cluster>).
 #
 # Spoke rollout: ManifestWork (default) or kubeconfig.
 # spokePush: spokes receive only token + server + CA in a Secret (no kubeconfig file);
@@ -28,6 +27,7 @@ TARGET_NAMESPACE="${TARGET_NAMESPACE:-openshift-config}"
 MANAGED_CLUSTER_LABEL_SELECTOR="${MANAGED_CLUSTER_LABEL_SELECTOR:-}"
 EXCLUDE_CLUSTERS="${EXCLUDE_CLUSTERS:-}"
 INCLUDE_INGRESS_CA="${INCLUDE_INGRESS_CA:-false}"
+INCLUDE_SYSTEM_TRUST_STORE="${INCLUDE_SYSTEM_TRUST_STORE:-false}"
 ADDITIONAL_CA_FILE="${ADDITIONAL_CA_FILE:-}"
 WAIT_FOR_AVAILABLE="${WAIT_FOR_AVAILABLE:-true}"
 CLUSTER_READINESS_MAX_ATTEMPTS="${CLUSTER_READINESS_MAX_ATTEMPTS:-150}"
@@ -58,6 +58,13 @@ hub_only_mode() {
   esac
 }
 
+include_system_trust_store_enabled() {
+  case "${INCLUDE_SYSTEM_TRUST_STORE:-false}" in
+    true|True|TRUE|yes|Yes|YES|1) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Default-on: spokes should get the same Proxy trustedCA wiring as the hub unless explicitly disabled.
 manifestwork_proxy_patch_enabled() {
   case "${MANIFESTWORK_PATCH_CLUSTER_PROXY:-true}" in
@@ -76,7 +83,7 @@ if [[ "$MANAGED_CLUSTER_CA_SOURCE" == "spokePush" ]] && ! hub_only_mode; then
   source "${VP_SPOKE_PUSH_INCLUDE_DIR}/build-manifestwork.sh"
 fi
 if hub_only_mode; then
-  log "ACM disabled (ACM_ENABLED=false): hub-only — merge hub trusted material and apply ${TARGET_NAMESPACE}/${CONFIG_MAP_NAME} + Proxy/cluster (no ManagedCluster / ManifestWork / spoke agents)"
+  log "ACM disabled (ACM_ENABLED=false): hub-only — merge hub API/ingress/system-trust material and apply ${TARGET_NAMESPACE}/${CONFIG_MAP_NAME} + Proxy/cluster (no ManagedCluster / ManifestWork / spoke agents)"
   if [[ "$MANAGED_CLUSTER_CA_SOURCE" == "spokePush" ]]; then
     log "note: managedClusterCaSource spokePush requires ACM; ignoring spoke material in this run"
   fi
@@ -405,9 +412,11 @@ rm -rf "$RAW_DIR" "$PEM_DIR"
 mkdir -p "$RAW_DIR" "$PEM_DIR"
 
 # --- Hub ---
-log "extract hub trusted bundle"
-extract_trusted_ca_bundle "hub" "$RAW_DIR/hub-trusted.crt" "" || true
+log "extract hub API CA bundle"
 extract_kube_apiserver_ca "hub" "$RAW_DIR/hub-api.crt" "" || true
+if include_system_trust_store_enabled; then
+  extract_trusted_ca_bundle "hub" "$RAW_DIR/hub-trusted.crt" "" || true
+fi
 if [[ "$INCLUDE_INGRESS_CA" == "true" ]]; then
   extract_ingress_ca "hub" "$RAW_DIR/hub-ingress.crt" "" || true
   if [[ ! -s "$RAW_DIR/hub-ingress.crt" ]]; then
@@ -465,8 +474,10 @@ if ! hub_only_mode; then
       extract_acm_client_ca_bundles "$cluster" "$RAW_DIR/${cluster}-acm-client.crt" || true
       kc_path=""
       if kc_path="$(write_spoke_kubeconfig "$cluster")"; then
-        extract_trusted_ca_bundle "$cluster" "$RAW_DIR/${cluster}-trusted.crt" "$kc_path" || true
         extract_kube_apiserver_ca "$cluster" "$RAW_DIR/${cluster}-api.crt" "$kc_path" || true
+        if include_system_trust_store_enabled; then
+          extract_trusted_ca_bundle "$cluster" "$RAW_DIR/${cluster}-trusted.crt" "$kc_path" || true
+        fi
         if [[ "$INCLUDE_INGRESS_CA" == "true" ]]; then
           extract_ingress_ca "$cluster" "$RAW_DIR/${cluster}-ingress.crt" "$kc_path" || true
         fi
@@ -478,8 +489,10 @@ if ! hub_only_mode; then
     else
       kc_path=""
       if kc_path="$(write_spoke_kubeconfig "$cluster")"; then
-        extract_trusted_ca_bundle "$cluster" "$RAW_DIR/${cluster}-trusted.crt" "$kc_path" || true
         extract_kube_apiserver_ca "$cluster" "$RAW_DIR/${cluster}-api.crt" "$kc_path" || true
+        if include_system_trust_store_enabled; then
+          extract_trusted_ca_bundle "$cluster" "$RAW_DIR/${cluster}-trusted.crt" "$kc_path" || true
+        fi
         if [[ "$INCLUDE_INGRESS_CA" == "true" ]]; then
           extract_ingress_ca "$cluster" "$RAW_DIR/${cluster}-ingress.crt" "$kc_path" || true
         fi

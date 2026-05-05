@@ -3,8 +3,8 @@
 namespace: openshift-config
 
 # When false, skip ACM APIs (ManagedCluster, ManifestWork), Governance Policy, and spoke-push agents.
-# The gather job only merges hub openshift-config-managed/trusted-ca-bundle (+ optional ingress and
-# additionalCaBundles) and applies ConfigMap + Proxy/cluster on this cluster (local hub only).
+# The gather job only merges hub API CAs (+ optional ingress + optional system trust + additionalCaBundles)
+# and applies ConfigMap + Proxy/cluster on this cluster (local hub only).
 # Default true: multicluster rollout and policy match an ACM hub.
 acm:
   # -- When false, hub-only proxy CA (no multicluster); policy.* and spokePush hub assets are not applied.
@@ -48,10 +48,10 @@ managedClusterLabelSelector: ""
 excludeManagedClusters: ""
 
 # How to read trust material for each ManagedCluster:
-# - spokePush (default): each spoke runs a CronJob (ManifestWork) that pushes trusted-ca-bundle (+ optional ingress)
+# - spokePush (default): each spoke runs a CronJob (ManifestWork) that pushes API CAs (+ optional ingress, + optional system trust)
 #   into ConfigMaps in spokePush.hubNamespace on the hub; the gather job reads all bundle-* ConfigMaps.
-# - acm: spec.managedClusterClientConfigs[].caBundle on ManagedCluster (hub API only; not each spoke's full platform bundle).
-# - spokeTrustedCaBundle: fetch openshift-config-managed/trusted-ca-bundle via import kubeconfig.
+# - acm: spec.managedClusterClientConfigs[].caBundle on ManagedCluster (hub API only; plus optional pull of ingress/system trust when kubeconfig exists).
+# - spokeTrustedCaBundle: fetch API CAs (+ optional ingress, + optional system trust) via import kubeconfig.
 managedClusterCaSource: spokePush
 
 # When managedClusterCaSource is spokePush: hub namespace for per-cluster ConfigMaps (bundle-<cluster>).
@@ -85,12 +85,17 @@ manifestWork:
 # -- Include default ingress `router-ca` PEMs in the merge when hub/spoke API access allows (API CAs are merged regardless).
 includeIngressCA: true
 
+# Include OpenShift platform/system trust bundle (openshift-config-managed/trusted-ca-bundle) for hub and spokes.
+# Default false: keep merged bundle focused on API + ingress CAs unless you explicitly include platform trust.
+# -- Include cluster system trust store (trusted-ca-bundle) from hub/spokes in addition to API and optional ingress CAs.
+includeSystemTrustStore: false
+
 # Wait until ManagedClusterConditionAvailable=True before touching a spoke.
 waitForManagedClusterAvailable: true
 clusterReadinessMaxAttempts: 150
 clusterReadinessSleepSeconds: 30
 
-# Vault is expected on the hub: hub trusted-ca-bundle, kube-apiserver-server-ca (API), and ingress CA are gathered into
+# Vault is expected on the hub: hub API CAs (and optional ingress / system trust when enabled) are gathered into
 # the merge, so you normally do not add Vault's CA here. If Vault runs outside the hub (or
 # presents a chain not already in that merged bundle), add the issuing CA PEM(s) below.
 #
