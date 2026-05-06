@@ -1,7 +1,7 @@
 
 # vp-manage-proxy-cluster-ca
 
-![Version: 0.1.1](https://img.shields.io/badge/Version-0.1.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
+![Version: 0.1.2](https://img.shields.io/badge/Version-0.1.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
 
 Hub-side chart for OpenShift. With ACM (default), distributes a merged CA bundle to ManagedClusters via ManifestWork (default gather: API + ingress CAs; optional system trust store), including Proxy/cluster trustedCA on spokes unless turned off. API CA collection is tunable via includeApiCA (default true). Set acm.enabled false for a standalone cluster: gather hub-local CA inputs and manage local Proxy/ConfigMap without ACM APIs. ACM Policy + PlacementBinding (when acm.enabled) add Governance visibility with default inform remediation; they do not gate rollout. Override policy.* or excludeManagedClusters as needed.
 
@@ -60,7 +60,7 @@ Use **`additionalCaBundles`** in **`values.yaml`** when you need PEMs in the **c
 
 ### Distribution to managed clusters (defaults)
 
-The default path is **`distributeToSpokes: manifestwork`**: the gather **CronJob/Job** lists hub **ManagedCluster** objects (respecting **`managedClusterLabelSelector`** and **`excludeManagedClusters`**), then applies **ManifestWork** in each cluster namespace so the **work agent** reconciles the merged **ConfigMap** and (unless disabled) **`Proxy/cluster` `trustedCA`**. That is the chart’s primary “distribute to spokes” behavior. **ManifestWork for the managed cluster name `local-cluster` is skipped** because the hub copy is already applied in-cluster.
+The default path is **`distributeToSpokes: manifestwork`**: the gather **CronJob/Job** lists hub **ManagedCluster** objects (respecting **`managedClusterLabelSelector`** and **`excludeManagedClusters`**), then applies **ManifestWork** in each cluster namespace so the **work agent** reconciles the merged **ConfigMap** and (unless disabled) **`Proxy/cluster` `trustedCA`**. When **`manifestWork.patchClusterProxy`** is **true**, **`manifestWork.grantKlusterletProxyPatchRBAC`** (default **true**) prepends a **ClusterRole** + **ClusterRoleBinding** on the spoke so **`system:serviceaccount:open-cluster-management-agent:klusterlet-work-sa`** can **patch** **`proxies/cluster`** (OpenShift often denies that by default). That is the chart’s primary “distribute to spokes” behavior. **ManifestWork for the managed cluster name `local-cluster` is skipped** because the hub copy is already applied in-cluster.
 
 ### Policy visibility in ACM (recommended)
 
@@ -78,7 +78,7 @@ Helm chart for the **hub** cluster (OpenShift + ACM). It periodically aggregates
   - **`acm`**: always **`ManagedCluster.spec.managedClusterClientConfigs[].caBundle`** (API client trust). When an **import kubeconfig** Secret exists in the managed-cluster namespace, the job also pulls that spoke’s **kube-apiserver-server-ca** (API), optional **`router-ca`**, and optional **`trusted-ca-bundle`**—same as **`spokeTrustedCaBundle`** for those fetches.
   - **`spokeTrustedCaBundle`**: per spoke, **kube-apiserver-server-ca** (API), optional **`router-ca`**, and optional **`trusted-ca-bundle`**, via ACM import kubeconfig ([opp-policy-chart](https://github.com/validatedpatterns/opp-policy-chart)-style).
 
-Certificates are **split and de-duplicated** by SHA-256 certificate fingerprint, then written to a single `ConfigMap` (`ca-bundle.crt`) in `openshift-config`. On the hub the job applies the ConfigMap and patches **`Proxy/cluster`**. On spokes (defaults) it applies one **`ManifestWork`** per cluster (ConfigMap, then **`Proxy` `trustedCA`** in the same manifest list when **`manifestWork.patchClusterProxy`** is true) so ordering is deterministic — still **no kubeconfig** in the chart or job for rollout. Set `distributeToSpokes: kubeconfig` to push via import secrets instead.
+Certificates are **split and de-duplicated** by SHA-256 certificate fingerprint, then written to a single `ConfigMap` (`ca-bundle.crt`) in `openshift-config`. On the hub the job applies the ConfigMap and patches **`Proxy/cluster`**. On spokes (defaults) it applies one **`ManifestWork`** per cluster (optional **klusterlet** **Proxy** RBAC when **`manifestWork.grantKlusterletProxyPatchRBAC`**, then **ConfigMap**, then **`Proxy` `trustedCA`** when **`manifestWork.patchClusterProxy`** is true) so ordering is deterministic — still **no kubeconfig** in the chart or job for rollout. Set `distributeToSpokes: kubeconfig` to push via import secrets instead.
 
 **`policy.enabled`** (default **true**) adds ACM **Policy** + **PlacementBinding**—**leave on** for GRC compliance and violation columns unless another team owns the same **Proxy** **ConfigurationPolicy**. Default **`policy.remediationAction: inform`** avoids competing with **ManifestWork** on **`Proxy`**. **`policy.createPlacement`** (default **true**) renders **`Placement`** for **`policy.placement.clusterSets`** (default **`global`**). **`policy.createManagedClusterSetBindings`** defaults to **`false`**—see the **GitOps** callout; ensure **`global`** is still bound in that workspace so **Placement** (and **Policy** status) stay healthy. Set **`policy.createPlacement: false`** only if you supply your own **Placement** + bindings. **Placement troubleshooting** (for example **`NoIntersection`**): same-namespace **`ManagedClusterSetBinding`** as **Placement**, **`policy.placement.clusterSets`** membership, and workspace **`policy.placementRef.namespace`** / **`policy.hubNamespace`**—see the **Hub cluster group — `namespaces`** table later in this document.
 
@@ -302,6 +302,8 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 | `spokePush.*` | Hub namespace, spoke sync namespace, CronJob schedule, token duration, optional hub API override (`hubApiServer`). |
 | `distributeToSpokes` | `manifestwork` (default): `ManifestWork` in each cluster namespace. `kubeconfig`: apply/patch via import kubeconfig. |
 | `manifestWork.patchClusterProxy` | Adds `Proxy/cluster` `trustedCA` to the **same** spoke ManifestWork as the bundle (default true; set false if Policy or another process owns Proxy on spokes). |
+| `manifestWork.grantKlusterletProxyPatchRBAC` | Default **true**: spoke ManifestWork includes **ClusterRole** / **Binding** so **klusterlet-work-sa** can patch **Proxy/cluster**. Set **false** only if your platform already grants that (avoid duplicate bindings). |
+| `manifestWork.klusterletWorkServiceAccountNamespace` / `klusterletWorkServiceAccountName` | Subject for that binding (defaults **open-cluster-management-agent** / **klusterlet-work-sa**). |
 | `additionalCaBundles` | **Inject** extra PEMs into the merged bundle (see **Injecting extra CA material** above); merged then fingerprint de-duplicated. |
 | `includeApiCA` | When true (default), merge API CAs (`kube-apiserver-server-ca` + fallbacks, including kubeconfig CA data for remote pulls). |
 | `includeIngressCA` | When true (default), merge **`router-ca`** on hub and on spokes where reachable. |
@@ -350,6 +352,9 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 | includeSystemTrustStore | bool | `false` | Include cluster system trust store (trusted-ca-bundle) from hub/spokes in addition to API and optional ingress CAs. |
 | managedClusterCaSource | string | `"spokePush"` |  |
 | managedClusterLabelSelector | string | `""` |  |
+| manifestWork.grantKlusterletProxyPatchRBAC | bool | `true` | When true (default), prepend ClusterRole + ClusterRoleBinding on each spoke so klusterlet-work-sa can patch Proxy/cluster (ManifestWork SSA on OpenShift Proxy). |
+| manifestWork.klusterletWorkServiceAccountName | string | `"klusterlet-work-sa"` | Name of the spoke klusterlet work ServiceAccount bound for Proxy patch. |
+| manifestWork.klusterletWorkServiceAccountNamespace | string | `"open-cluster-management-agent"` | Namespace of the spoke klusterlet work ServiceAccount (for ClusterRoleBinding subjects). |
 | manifestWork.nameOverride | string | `""` |  |
 | manifestWork.patchClusterProxy | bool | `true` |  |
 | manifestWork.proxyNameOverride | string | `""` |  |

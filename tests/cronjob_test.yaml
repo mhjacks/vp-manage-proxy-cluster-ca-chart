@@ -34,6 +34,21 @@ tests:
           content:
             name: INCLUDE_SYSTEM_TRUST_STORE
             value: "false"
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: MANIFESTWORK_GRANT_KLUSTERLET_PROXY_RBAC
+            value: "true"
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: KLUSTERLET_WORK_SA_NAMESPACE
+            value: open-cluster-management-agent
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: KLUSTERLET_WORK_SA_NAME
+            value: klusterlet-work-sa
   - it: sets ACM_ENABLED false for hub-only mode
     set:
       acm.enabled: false
@@ -80,6 +95,15 @@ tests:
           content:
             name: INCLUDE_SYSTEM_TRUST_STORE
             value: "true"
+  - it: allows grantKlusterletProxyPatchRBAC to be disabled
+    set:
+      manifestWork.grantKlusterletProxyPatchRBAC: false
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: MANIFESTWORK_GRANT_KLUSTERLET_PROXY_RBAC
+            value: "false"
   - it: mounts extra material when additionalCaBundles are provided
     set:
       additionalCaBundles:

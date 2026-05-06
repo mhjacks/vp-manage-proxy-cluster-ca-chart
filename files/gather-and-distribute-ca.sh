@@ -40,6 +40,9 @@ DISTRIBUTE_TO_SPOKES="${DISTRIBUTE_TO_SPOKES:-manifestwork}"
 MANIFEST_WORK_NAME="${MANIFEST_WORK_NAME:?}"
 MANIFEST_WORK_PROXY_NAME="${MANIFEST_WORK_PROXY_NAME:?}"
 MANIFESTWORK_PATCH_CLUSTER_PROXY="${MANIFESTWORK_PATCH_CLUSTER_PROXY:-true}"
+MANIFESTWORK_GRANT_KLUSTERLET_PROXY_RBAC="${MANIFESTWORK_GRANT_KLUSTERLET_PROXY_RBAC:-true}"
+KLUSTERLET_WORK_SA_NAMESPACE="${KLUSTERLET_WORK_SA_NAMESPACE:-open-cluster-management-agent}"
+KLUSTERLET_WORK_SA_NAME="${KLUSTERLET_WORK_SA_NAME:-klusterlet-work-sa}"
 ACM_ENABLED="${ACM_ENABLED:-true}"
 
 SPOKE_PUSH_HUB_NAMESPACE="${SPOKE_PUSH_HUB_NAMESPACE:-vp-proxy-ca-bundles}"
@@ -76,6 +79,13 @@ include_api_ca_enabled() {
 # Default-on: spokes should get the same Proxy trustedCA wiring as the hub unless explicitly disabled.
 manifestwork_proxy_patch_enabled() {
   case "${MANIFESTWORK_PATCH_CLUSTER_PROXY:-true}" in
+    true|True|TRUE|yes|Yes|YES|1) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+grant_klusterlet_proxy_rbac_enabled() {
+  case "${MANIFESTWORK_GRANT_KLUSTERLET_PROXY_RBAC:-true}" in
     true|True|TRUE|yes|Yes|YES|1) return 0 ;;
     *) return 1 ;;
   esac
@@ -348,9 +358,9 @@ bundle_to_single_line_b64() {
   { base64 <"$bundle" 2>/dev/null || base64 "$bundle"; } | tr -d '\n' >"$out"
 }
 
-# One ManifestWork per cluster so workload.manifests apply in list order: ConfigMap must exist
-# before Proxy references it. Two separate ManifestWorks can reconcile out of order and leave
-# spec.trustedCA unset or rejected on the spoke.
+# One ManifestWork per cluster so workload.manifests apply in list order: optional klusterlet RBAC,
+# then ConfigMap, then Proxy (ConfigMap must exist before Proxy references it). Two separate
+# ManifestWorks can reconcile out of order and leave spec.trustedCA unset or rejected on the spoke.
 apply_manifestwork_spoke_rollout() {
   local cluster="$1"
   local bundle="$2"
@@ -359,11 +369,40 @@ apply_manifestwork_spoke_rollout() {
   local b64
   b64="$(cat "$b64file")"
   local tmp="$WORK_DIR/mw-${cluster}.yaml"
+  local rbac_block=""
+  local log_suffix=""
 
   # Drop legacy split Proxy ManifestWork from older chart revisions (same Proxy field, unordered vs bundle).
   oc delete manifestwork "${MANIFEST_WORK_PROXY_NAME}" -n "${cluster}" --ignore-not-found
 
   if manifestwork_proxy_patch_enabled; then
+    if grant_klusterlet_proxy_rbac_enabled; then
+      rbac_block="$(cat <<EOF
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRole
+        metadata:
+          name: vp-proxy-ca-klusterlet-proxy-patch
+        rules:
+          - apiGroups: ["config.openshift.io"]
+            resources: ["proxies"]
+            resourceNames: ["cluster"]
+            verbs: ["get", "patch", "update"]
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        metadata:
+          name: vp-proxy-ca-klusterlet-proxy-patch
+        roleRef:
+          apiGroup: rbac.authorization.k8s.io
+          kind: ClusterRole
+          name: vp-proxy-ca-klusterlet-proxy-patch
+        subjects:
+          - kind: ServiceAccount
+            name: ${KLUSTERLET_WORK_SA_NAME}
+            namespace: ${KLUSTERLET_WORK_SA_NAMESPACE}
+EOF
+)"
+      log_suffix="klusterlet Proxy RBAC, "
+    fi
     # ServerSideApply for cluster Proxy: avoids ApplyConflict / ignored trustedCA when other actors
     # (e.g. network/cluster operators) own other Proxy fields on the spoke.
     cat >"$tmp" <<EOF
@@ -384,6 +423,7 @@ spec:
           force: true
   workload:
     manifests:
+${rbac_block}
       - apiVersion: v1
         kind: ConfigMap
         metadata:
@@ -399,7 +439,7 @@ spec:
           trustedCA:
             name: ${CONFIG_MAP_NAME}
 EOF
-    log "ManifestWork ${cluster}/${MANIFEST_WORK_NAME} apply (ConfigMap then Proxy trustedCA)"
+    log "ManifestWork ${cluster}/${MANIFEST_WORK_NAME} apply (${log_suffix}ConfigMap then Proxy trustedCA)"
   else
     cat >"$tmp" <<EOF
 apiVersion: work.open-cluster-management.io/v1

@@ -75,9 +75,15 @@ manifestWork:
   nameOverride: ""
   proxyNameOverride: ""
   # Spokes should match the hub: set Proxy/cluster trustedCA to the merged bundle ConfigMap (default true).
-  # Renders as the second manifest in the same ManifestWork as the bundle (strict apply order).
+  # Renders in the same ManifestWork as the bundle (strict apply order: optional klusterlet RBAC, ConfigMap, Proxy).
   # Legacy standalone Proxy ManifestWork name is MANIFEST_WORK_PROXY_NAME for delete-on-upgrade cleanup.
   patchClusterProxy: true
+  # -- When true (default), prepend ClusterRole + ClusterRoleBinding on each spoke so klusterlet-work-sa can patch Proxy/cluster (ManifestWork SSA on OpenShift Proxy).
+  grantKlusterletProxyPatchRBAC: true
+  # -- Namespace of the spoke klusterlet work ServiceAccount (for ClusterRoleBinding subjects).
+  klusterletWorkServiceAccountNamespace: open-cluster-management-agent
+  # -- Name of the spoke klusterlet work ServiceAccount bound for Proxy patch.
+  klusterletWorkServiceAccountName: klusterlet-work-sa
 
 # Include Kubernetes/OpenShift API server trust (kube-apiserver-server-ca, kube-root-ca fallback,
 # kubeconfig certificate-authority-data fallback for remote pulls, SA CA fallback for local/spoke push).

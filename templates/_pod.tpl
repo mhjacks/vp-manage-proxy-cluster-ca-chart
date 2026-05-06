@@ -31,6 +31,12 @@ Shared container definition for CronJob and sync Job.
       value: {{ include "vpProxyCa.manifestWorkProxyName" . | quote }}
     - name: MANIFESTWORK_PATCH_CLUSTER_PROXY
       value: {{ .Values.manifestWork.patchClusterProxy | toString | quote }}
+    - name: MANIFESTWORK_GRANT_KLUSTERLET_PROXY_RBAC
+      value: {{ .Values.manifestWork.grantKlusterletProxyPatchRBAC | toString | quote }}
+    - name: KLUSTERLET_WORK_SA_NAMESPACE
+      value: {{ .Values.manifestWork.klusterletWorkServiceAccountNamespace | quote }}
+    - name: KLUSTERLET_WORK_SA_NAME
+      value: {{ .Values.manifestWork.klusterletWorkServiceAccountName | quote }}
     - name: SPOKE_PUSH_HUB_NAMESPACE
       value: {{ .Values.spokePush.hubNamespace | quote }}
     - name: SPOKE_PUSH_SPOKE_NAMESPACE
