@@ -79,10 +79,14 @@ manifestWork:
   # Legacy standalone Proxy ManifestWork name is MANIFEST_WORK_PROXY_NAME for delete-on-upgrade cleanup.
   patchClusterProxy: true
 
-# When true, merge default ingress router CA (openshift-ingress-operator/router-ca) for hub and spokes
-# (where the gather path can reach the spoke API). API / kube-apiserver CAs are always attempted separately
-# (kube-apiserver-server-ca ConfigMap, kube-root-ca.crt fallback, or in-cluster service account CA on the hub / push CronJob).
-# -- Include default ingress `router-ca` PEMs in the merge when hub/spoke API access allows (API CAs are merged regardless).
+# Include Kubernetes/OpenShift API server trust (kube-apiserver-server-ca, kube-root-ca fallback,
+# kubeconfig certificate-authority-data fallback for remote pulls, SA CA fallback for local/spoke push).
+# -- Include API CA PEMs from hub/spokes in the merge (default true).
+includeApiCA: true
+
+# When true (default), merge default ingress router CA (openshift-ingress-operator/router-ca) for hub and spokes
+# where the gather path can reach the spoke API.
+# -- Include default ingress `router-ca` PEMs in the merge when hub/spoke API access allows.
 includeIngressCA: true
 
 # Include OpenShift platform/system trust bundle (openshift-config-managed/trusted-ca-bundle) for hub and spokes.

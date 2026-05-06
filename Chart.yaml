@@ -3,6 +3,7 @@ name: vp-manage-proxy-cluster-ca
 description: >-
   Hub-side chart for OpenShift. With ACM (default), distributes a merged CA bundle to ManagedClusters
   via ManifestWork (default gather: API + ingress CAs; optional system trust store), including Proxy/cluster trustedCA on spokes unless turned off.
+  API CA collection is tunable via includeApiCA (default true).
   Set acm.enabled false for a standalone cluster: gather hub-local CA inputs and manage local Proxy/ConfigMap without ACM APIs.
   ACM Policy + PlacementBinding (when acm.enabled) add Governance visibility with default inform remediation; they do not gate rollout.
   Override policy.* or excludeManagedClusters as needed.

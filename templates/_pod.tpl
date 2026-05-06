@@ -47,6 +47,8 @@ Shared container definition for CronJob and sync Job.
       value: {{ printf "%s:%s" .Values.image.repository .Values.image.tag | quote }}
     - name: INCLUDE_INGRESS_CA
       value: {{ .Values.includeIngressCA | quote }}
+    - name: INCLUDE_API_CA
+      value: {{ .Values.includeApiCA | quote }}
     - name: INCLUDE_SYSTEM_TRUST_STORE
       value: {{ .Values.includeSystemTrustStore | quote }}
     - name: WAIT_FOR_AVAILABLE

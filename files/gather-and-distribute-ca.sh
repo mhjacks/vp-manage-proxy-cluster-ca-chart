@@ -4,10 +4,10 @@
 # When ACM_ENABLED is false, only hub material is merged and the hub Proxy is updated (no multicluster APIs).
 #
 # Managed cluster CA sources:
-# - acm: ManagedCluster.spec.managedClusterClientConfigs[].caBundle plus, when import kubeconfig exists,
-#   spoke kube-apiserver-server-ca (API), optional ingress router-ca, and optional system trusted-ca-bundle.
-# - spokeTrustedCaBundle: kube-apiserver-server-ca (API), optional ingress, and optional system trust via import kubeconfig.
-# - spokePush: each spoke CronJob merges kube-apiserver-server-ca (or in-cluster API CA),
+# - acm: ManagedCluster.spec.managedClusterClientConfigs[].caBundle (if INCLUDE_API_CA) plus, when import kubeconfig exists,
+#   spoke kube-apiserver-server-ca (if INCLUDE_API_CA), optional ingress router-ca, and optional system trusted-ca-bundle.
+# - spokeTrustedCaBundle: kube-apiserver-server-ca (if INCLUDE_API_CA), optional ingress, and optional system trust via import kubeconfig.
+# - spokePush: each spoke CronJob merges kube-apiserver-server-ca (or in-cluster API CA) when INCLUDE_API_CA,
 #   optional router-ca (ingress), and optional system trust, then pushes to hub ConfigMaps (bundle-<cluster>).
 #
 # Spoke rollout: ManifestWork (default) or kubeconfig.
@@ -27,6 +27,7 @@ TARGET_NAMESPACE="${TARGET_NAMESPACE:-openshift-config}"
 MANAGED_CLUSTER_LABEL_SELECTOR="${MANAGED_CLUSTER_LABEL_SELECTOR:-}"
 EXCLUDE_CLUSTERS="${EXCLUDE_CLUSTERS:-}"
 INCLUDE_INGRESS_CA="${INCLUDE_INGRESS_CA:-false}"
+INCLUDE_API_CA="${INCLUDE_API_CA:-true}"
 INCLUDE_SYSTEM_TRUST_STORE="${INCLUDE_SYSTEM_TRUST_STORE:-false}"
 ADDITIONAL_CA_FILE="${ADDITIONAL_CA_FILE:-}"
 WAIT_FOR_AVAILABLE="${WAIT_FOR_AVAILABLE:-true}"
@@ -65,6 +66,13 @@ include_system_trust_store_enabled() {
   esac
 }
 
+include_api_ca_enabled() {
+  case "${INCLUDE_API_CA:-true}" in
+    true|True|TRUE|yes|Yes|YES|1) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Default-on: spokes should get the same Proxy trustedCA wiring as the hub unless explicitly disabled.
 manifestwork_proxy_patch_enabled() {
   case "${MANIFESTWORK_PATCH_CLUSTER_PROXY:-true}" in
@@ -83,7 +91,7 @@ if [[ "$MANAGED_CLUSTER_CA_SOURCE" == "spokePush" ]] && ! hub_only_mode; then
   source "${VP_SPOKE_PUSH_INCLUDE_DIR}/build-manifestwork.sh"
 fi
 if hub_only_mode; then
-  log "ACM disabled (ACM_ENABLED=false): hub-only — merge hub API/ingress/system-trust material and apply ${TARGET_NAMESPACE}/${CONFIG_MAP_NAME} + Proxy/cluster (no ManagedCluster / ManifestWork / spoke agents)"
+  log "ACM disabled (ACM_ENABLED=false): hub-only — merge configured hub CA inputs (API/ingress/system-trust) and apply ${TARGET_NAMESPACE}/${CONFIG_MAP_NAME} + Proxy/cluster (no ManagedCluster / ManifestWork / spoke agents)"
   if [[ "$MANAGED_CLUSTER_CA_SOURCE" == "spokePush" ]]; then
     log "note: managedClusterCaSource spokePush requires ACM; ignoring spoke material in this run"
   fi
@@ -202,7 +210,8 @@ extract_ingress_ca() {
 }
 
 # Kubernetes/OpenShift API server TLS CAs (distinct from platform trusted-ca-bundle and from ACM client caBundle).
-# Order: openshift-config-managed/kube-apiserver-server-ca, openshift-config/kube-root-ca.crt, in-cluster SA CA (hub only).
+# Order: openshift-config-managed/kube-apiserver-server-ca, openshift-config/kube-root-ca.crt,
+# kubeconfig certificate-authority-data (remote/HyperShift-safe), in-cluster SA CA (hub/local).
 extract_kube_apiserver_ca() {
   local label="$1"
   local dest="$2"
@@ -220,6 +229,14 @@ extract_kube_apiserver_ca() {
     -o jsonpath='{.data.ca\.crt}' >"$dest" 2>/dev/null && [[ -s "$dest" ]]; then
     log "kube-root-ca.crt from ${label} ($(wc -c <"$dest") bytes)"
     return 0
+  fi
+  if [[ -n "$kc" ]]; then
+    local kc_ca_b64=""
+    kc_ca_b64="$(oc config view --kubeconfig "$kc" --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' 2>/dev/null || true)"
+    if [[ -n "$kc_ca_b64" ]] && printf '%s' "$kc_ca_b64" | base64 -d >"$dest" 2>/dev/null && [[ -s "$dest" ]]; then
+      log "API CA from kubeconfig cluster.certificate-authority-data (${label})"
+      return 0
+    fi
   fi
   if [[ -z "$kc" ]] && [[ -r /var/run/secrets/kubernetes.io/serviceaccount/ca.crt ]]; then
     cp /var/run/secrets/kubernetes.io/serviceaccount/ca.crt "$dest"
@@ -412,8 +429,10 @@ rm -rf "$RAW_DIR" "$PEM_DIR"
 mkdir -p "$RAW_DIR" "$PEM_DIR"
 
 # --- Hub ---
-log "extract hub API CA bundle"
-extract_kube_apiserver_ca "hub" "$RAW_DIR/hub-api.crt" "" || true
+if include_api_ca_enabled; then
+  log "extract hub API CA bundle"
+  extract_kube_apiserver_ca "hub" "$RAW_DIR/hub-api.crt" "" || true
+fi
 if include_system_trust_store_enabled; then
   extract_trusted_ca_bundle "hub" "$RAW_DIR/hub-trusted.crt" "" || true
 fi
@@ -471,10 +490,14 @@ if ! hub_only_mode; then
     if [[ "$MANAGED_CLUSTER_CA_SOURCE" == "spokePush" ]]; then
       gather_pushed_bundle_from_hub "$cluster" "$RAW_DIR/${cluster}-pushed.crt" || true
     elif [[ "$MANAGED_CLUSTER_CA_SOURCE" == "acm" ]]; then
-      extract_acm_client_ca_bundles "$cluster" "$RAW_DIR/${cluster}-acm-client.crt" || true
+      if include_api_ca_enabled; then
+        extract_acm_client_ca_bundles "$cluster" "$RAW_DIR/${cluster}-acm-client.crt" || true
+      fi
       kc_path=""
       if kc_path="$(write_spoke_kubeconfig "$cluster")"; then
-        extract_kube_apiserver_ca "$cluster" "$RAW_DIR/${cluster}-api.crt" "$kc_path" || true
+        if include_api_ca_enabled; then
+          extract_kube_apiserver_ca "$cluster" "$RAW_DIR/${cluster}-api.crt" "$kc_path" || true
+        fi
         if include_system_trust_store_enabled; then
           extract_trusted_ca_bundle "$cluster" "$RAW_DIR/${cluster}-trusted.crt" "$kc_path" || true
         fi
@@ -489,7 +512,9 @@ if ! hub_only_mode; then
     else
       kc_path=""
       if kc_path="$(write_spoke_kubeconfig "$cluster")"; then
-        extract_kube_apiserver_ca "$cluster" "$RAW_DIR/${cluster}-api.crt" "$kc_path" || true
+        if include_api_ca_enabled; then
+          extract_kube_apiserver_ca "$cluster" "$RAW_DIR/${cluster}-api.crt" "$kc_path" || true
+        fi
         if include_system_trust_store_enabled; then
           extract_trusted_ca_bundle "$cluster" "$RAW_DIR/${cluster}-trusted.crt" "$kc_path" || true
         fi

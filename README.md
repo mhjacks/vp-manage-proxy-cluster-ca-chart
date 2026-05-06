@@ -3,9 +3,9 @@
 
 ![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
 
-Hub-side chart for OpenShift. With ACM (default), distributes a merged CA bundle to ManagedClusters via ManifestWork (default gather: API + ingress CAs; optional system trust store), including Proxy/cluster trustedCA on spokes unless turned off. Set acm.enabled false for a standalone cluster: gather hub-local CA inputs and manage local Proxy/ConfigMap without ACM APIs. ACM Policy + PlacementBinding (when acm.enabled) add Governance visibility with default inform remediation; they do not gate rollout. Override policy.* or excludeManagedClusters as needed.
+Hub-side chart for OpenShift. With ACM (default), distributes a merged CA bundle to ManagedClusters via ManifestWork (default gather: API + ingress CAs; optional system trust store), including Proxy/cluster trustedCA on spokes unless turned off. API CA collection is tunable via includeApiCA (default true). Set acm.enabled false for a standalone cluster: gather hub-local CA inputs and manage local Proxy/ConfigMap without ACM APIs. ACM Policy + PlacementBinding (when acm.enabled) add Governance visibility with default inform remediation; they do not gate rollout. Override policy.* or excludeManagedClusters as needed.
 
-**At a glance:** With **`acm.enabled: true`** (default), **ManifestWork** rolls the merged CA **ConfigMap** and **`Proxy/cluster` `trustedCA`** to spokes; defaults collect **API CAs** plus **ingress CAs** (`includeIngressCA: true`) for hub and spokes. **System trust store** (`trusted-ca-bundle`) is optional via **`includeSystemTrustStore: true`** and is **off by default**. **ACM Policy + PlacementBinding** add **GRC** compliance and **cluster violation** detail using default **`policy.remediationAction: inform`**. With **`acm.enabled: false`**, the job gathers only hub-local sources and updates local **`openshift-config`** **ConfigMap** + **`Proxy`**. Override **policy.*** or **excludeManagedClusters** as needed. See **Policy visibility in ACM** and **Hub-only (`acm.enabled: false`)** under Overview.
+**At a glance:** With **`acm.enabled: true`** (default), **ManifestWork** rolls the merged CA **ConfigMap** and **`Proxy/cluster` `trustedCA`** to spokes; defaults collect **API CAs** (**`includeApiCA: true`**) plus **ingress CAs** (**`includeIngressCA: true`**) for hub and spokes. **System trust store** (`trusted-ca-bundle`) is optional via **`includeSystemTrustStore: true`** and is **off by default**. **ACM Policy + PlacementBinding** add **GRC** compliance and **cluster violation** detail using default **`policy.remediationAction: inform`**. With **`acm.enabled: false`**, the job gathers only configured hub-local sources and updates local **`openshift-config`** **ConfigMap** + **`Proxy`**. Override **policy.*** or **excludeManagedClusters** as needed. See **Policy visibility in ACM** and **Hub-only (`acm.enabled: false`)** under Overview.
 
 ## Overview
 
@@ -50,7 +50,7 @@ Use the **`ConfigMap`** entry only if that object is **declared in the same Appl
 
 ### Hub-only (`acm.enabled: false`)
 
-Use on **standalone OpenShift** (no multicluster engine / no **ManagedCluster** API). The gather job **does not** list clusters, deploy **spoke-push** agents, create **ManifestWork**, or render **Policy** / **Placement**. It gathers hub **API CAs** (`kube-apiserver-server-ca` with fallbacks), optional **`router-ca`** when **`includeIngressCA`**, optional **`trusted-ca-bundle`** when **`includeSystemTrustStore`**, and **`additionalCaBundles`**; then de-duplicates and applies **`configMapName`** + patches **`Proxy/cluster`** on **this** cluster. Values such as **`managedClusterCaSource`** and **`distributeToSpokes`** are ignored for multicluster behavior while **`acm.enabled`** is **false** (the script logs once if **`spokePush`** was selected).
+Use on **standalone OpenShift** (no multicluster engine / no **ManagedCluster** API). The gather job **does not** list clusters, deploy **spoke-push** agents, create **ManifestWork**, or render **Policy** / **Placement**. It gathers hub **API CAs** when **`includeApiCA`** (`kube-apiserver-server-ca` with fallbacks), optional **`router-ca`** when **`includeIngressCA`**, optional **`trusted-ca-bundle`** when **`includeSystemTrustStore`**, and **`additionalCaBundles`**; then de-duplicates and applies **`configMapName`** + patches **`Proxy/cluster`** on **this** cluster. Values such as **`managedClusterCaSource`** and **`distributeToSpokes`** are ignored for multicluster behavior while **`acm.enabled`** is **false** (the script logs once if **`spokePush`** was selected).
 
 ### Injecting extra CA material (`additionalCaBundles`)
 
@@ -74,7 +74,7 @@ Helm chart for the **hub** cluster (OpenShift + ACM). It periodically aggregates
 
 - the hub: **`ConfigMap/openshift-config-managed/kube-apiserver-server-ca`** (API / apiserver TLS bundle, with **`kube-root-ca.crt`** in `openshift-config` or in-cluster **service account CA** as fallbacks), plus when **`includeIngressCA`**: ingress **`router-ca`**, and when **`includeSystemTrustStore`**: **`trusted-ca-bundle`** (`ca-bundle.crt`);
 - each selected **ManagedCluster**:
-  - **`managedClusterCaSource: spokePush`** (default): a **ManifestWork** deploys a CronJob on each spoke that merges **`kube-apiserver-server-ca`** (or pod **service account CA** fallback), **`router-ca`** when **`includeIngressCA`**, and **`trusted-ca-bundle`** when **`includeSystemTrustStore`**; then **writes** `ConfigMap/bundle-<cluster>` into **`spokePush.hubNamespace`** on the hub (**no kubeconfig file** on the spoke). The gather job **reads every** `bundle-*` ConfigMap there.
+  - **`managedClusterCaSource: spokePush`** (default): a **ManifestWork** deploys a CronJob on each spoke that merges **`kube-apiserver-server-ca`** (or pod **service account CA** fallback), **`router-ca`** when **`includeIngressCA`**, and **`trusted-ca-bundle`** when **`includeSystemTrustStore`**; then **writes** `ConfigMap/bundle-<cluster>` into **`spokePush.hubNamespace`** on the hub (**no kubeconfig file** on the spoke). The gather job **reads every** `bundle-*` ConfigMap there. This fallback path is safe for hosted control planes / HyperShift worker-control-plane split.
   - **`acm`**: always **`ManagedCluster.spec.managedClusterClientConfigs[].caBundle`** (API client trust). When an **import kubeconfig** Secret exists in the managed-cluster namespace, the job also pulls that spoke’s **kube-apiserver-server-ca** (API), optional **`router-ca`**, and optional **`trusted-ca-bundle`**—same as **`spokeTrustedCaBundle`** for those fetches.
   - **`spokeTrustedCaBundle`**: per spoke, **kube-apiserver-server-ca** (API), optional **`router-ca`**, and optional **`trusted-ca-bundle`**, via ACM import kubeconfig ([opp-policy-chart](https://github.com/validatedpatterns/opp-policy-chart)-style).
 
@@ -91,7 +91,7 @@ Configuration splits into two **independent** axes:
 1. **`managedClusterCaSource`** — how the hub **gather job** obtains per-cluster trust material before merge/de-duplication.
 2. **`distributeToSpokes`** — how the merged bundle (and optional `Proxy` patch) is **applied on each spoke** after the hub updates its own `ConfigMap`/`Proxy`.
 
-The hub always reads **hub-local** **kube-apiserver-server-ca** (API) with fallbacks. **`includeIngressCA`** gates **router** ingress PEMs. **`includeSystemTrustStore`** gates **trusted-ca-bundle** (platform/system trust). On spokes, the same toggles apply wherever the job can reach the spoke API (**`spokePush`** script, **`spokeTrustedCaBundle`**, and **`acm`** when import kubeconfig is available).
+When **`includeApiCA`** is true (default), the hub reads **hub-local** **kube-apiserver-server-ca** (API) with fallbacks. For spoke pulls using import kubeconfig, API CA fallback also reads kubeconfig **`cluster.certificate-authority-data`** when ConfigMaps are not present (useful on hosted control planes / HyperShift). **`includeIngressCA`** gates **router** ingress PEMs. **`includeSystemTrustStore`** gates **trusted-ca-bundle** (platform/system trust). On spokes, the same toggles apply wherever the job can reach the spoke API (**`spokePush`** script, **`spokeTrustedCaBundle`**, and **`acm`** when import kubeconfig is available).
 
 ### How each `managedClusterCaSource` works
 
@@ -303,6 +303,7 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 | `distributeToSpokes` | `manifestwork` (default): `ManifestWork` in each cluster namespace. `kubeconfig`: apply/patch via import kubeconfig. |
 | `manifestWork.patchClusterProxy` | Adds `Proxy/cluster` `trustedCA` to the **same** spoke ManifestWork as the bundle (default true; set false if Policy or another process owns Proxy on spokes). |
 | `additionalCaBundles` | **Inject** extra PEMs into the merged bundle (see **Injecting extra CA material** above); merged then fingerprint de-duplicated. |
+| `includeApiCA` | When true (default), merge API CAs (`kube-apiserver-server-ca` + fallbacks, including kubeconfig CA data for remote pulls). |
 | `includeIngressCA` | When true (default), merge **`router-ca`** on hub and on spokes where reachable. |
 | `includeSystemTrustStore` | When true, merge **`trusted-ca-bundle`** (platform/system trust) from hub/spokes; default **false**. |
 | `cronJob` / `syncJob` | Scheduled refresh vs one-shot post-install/upgrade Job. |
@@ -320,7 +321,7 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 - **`policy.createManagedClusterSetBindings`** defaults to **`false`**: manage **`ManagedClusterSetBinding/global`** in a single platform Argo Application; set **`true`** only when this chart should own those objects.
 - **`policy.remediationAction`** defaults to **`inform`**: GRC shows compliance and violation detail while **ManifestWork** remains the default applier for spoke **`Proxy`**; use **`enforce`** only when you are not double-writing **`Proxy`** with **`manifestWork.patchClusterProxy: true`**.
 - **`acm.enabled`**: set **`false`** for standalone hubs to manage **only** the local **Proxy** bundle without **ManagedCluster** / **ManifestWork** / Governance objects from this chart.
-- **Gather defaults**: API CAs (**`kube-apiserver-server-ca`** / **`kube-root-ca.crt`** fallbacks) and ingress CAs are included by default (**`includeIngressCA: true`**). **`trusted-ca-bundle`** (system trust store) is now opt-in via **`includeSystemTrustStore: true`**.
+- **Gather defaults**: API CAs are on by default (**`includeApiCA: true`**) and use fallbacks (**`kube-apiserver-server-ca`** / **`kube-root-ca.crt`** / kubeconfig CA data). Ingress CAs are on by default (**`includeIngressCA: true`**). **`trusted-ca-bundle`** (system trust store) is opt-in via **`includeSystemTrustStore: true`**.
 - When **`includeIngressCA`** is **true**, render a **Role** + **RoleBinding** in **`openshift-ingress-operator`** so the gather **ServiceAccount** can **`get`** **`Secret/router-ca`** (previously only **ClusterRole** **Secrets** applied under **`acm.enabled`** + kubeconfig/spokeTrusted paths, so **hub-only** and default **`spokePush`** hubs skipped ingress silently). The gather script logs a **warning** if ingress was requested but no PEM was written.
 
 ## Values
@@ -344,7 +345,8 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 | image.pullPolicy | string | `"IfNotPresent"` |  |
 | image.repository | string | `"quay.io/validatedpatterns/imperative-container"` |  |
 | image.tag | string | `"latest"` |  |
-| includeIngressCA | bool | `true` | Include default ingress `router-ca` PEMs in the merge when hub/spoke API access allows (API CAs are merged regardless). |
+| includeApiCA | bool | `true` | Include API CA PEMs from hub/spokes in the merge (default true). |
+| includeIngressCA | bool | `true` | Include default ingress `router-ca` PEMs in the merge when hub/spoke API access allows. |
 | includeSystemTrustStore | bool | `false` | Include cluster system trust store (trusted-ca-bundle) from hub/spokes in addition to API and optional ingress CAs. |
 | managedClusterCaSource | string | `"spokePush"` |  |
 | managedClusterLabelSelector | string | `""` |  |

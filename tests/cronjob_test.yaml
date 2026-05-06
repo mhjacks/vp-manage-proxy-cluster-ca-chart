@@ -22,6 +22,16 @@ tests:
       - contains:
           path: spec.jobTemplate.spec.template.spec.containers[0].env
           content:
+            name: INCLUDE_API_CA
+            value: "true"
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: INCLUDE_INGRESS_CA
+            value: "true"
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
             name: INCLUDE_SYSTEM_TRUST_STORE
             value: "false"
   - it: sets ACM_ENABLED false for hub-only mode
@@ -36,5 +46,59 @@ tests:
       - contains:
           path: spec.jobTemplate.spec.template.spec.containers[0].env
           content:
+            name: INCLUDE_API_CA
+            value: "true"
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
             name: INCLUDE_SYSTEM_TRUST_STORE
             value: "false"
+  - it: allows includeApiCA to be disabled explicitly
+    set:
+      includeApiCA: false
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: INCLUDE_API_CA
+            value: "false"
+  - it: allows includeIngressCA to be disabled explicitly
+    set:
+      includeIngressCA: false
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: INCLUDE_INGRESS_CA
+            value: "false"
+  - it: allows includeSystemTrustStore to be enabled explicitly
+    set:
+      includeSystemTrustStore: true
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: INCLUDE_SYSTEM_TRUST_STORE
+            value: "true"
+  - it: mounts extra material when additionalCaBundles are provided
+    set:
+      additionalCaBundles:
+        - "TESTCERT"
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: ADDITIONAL_CA_FILE
+            value: /extra/ca.pem
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].volumeMounts
+          content:
+            name: additional-ca
+            mountPath: /extra
+            readOnly: true
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.volumes
+          content:
+            name: additional-ca
+            secret:
+              secretName: testrel-vp-manage-proxy-cluster-ca-additional-ca
