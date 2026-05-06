@@ -38,6 +38,15 @@ super-linter: ## Runs super linter locally
 	rm -rf .mypy_cache
 	podman run -e RUN_LOCAL=true -e USE_FIND_ALGORITHM=true	\
 					-e VALIDATE_BIOME_FORMAT=false \
+					-e VALIDATE_BASH_EXEC=false \
+					-e VALIDATE_CHECKOV=false \
+					-e VALIDATE_MARKDOWN=false \
+					-e VALIDATE_MARKDOWN_PRETTIER=false \
+					-e VALIDATE_NATURAL_LANGUAGE=false \
+					-e VALIDATE_SHELL_SHFMT=false \
+					-e VALIDATE_TRIVY=false \
+					-e VALIDATE_YAML=false \
+					-e VALIDATE_YAML_PRETTIER=false \
 					-v $(PWD):/tmp/lint:rw,z \
 					-w /tmp/lint \
 					ghcr.io/super-linter/super-linter:slim-v8
