@@ -62,7 +62,7 @@ spokePush:
   manifestWorkNameOverride: ""
   # Max duration for hub tokens embedded in spoke push Secrets (oc create token --duration).
   tokenDuration: 720h
-  # Optional override for hub API URL in spoke kubeconfig; empty uses gather pod cluster server + CA.
+  # -- Hub API URL embedded in spoke push Secrets (reachable from every spoke). Empty: kubeconfig cluster.server, else OpenShift `Infrastructure/cluster` status.apiServerURL, else `https://KUBERNETES_SERVICE_HOST:PORT`.
   hubApiServer: ""
 
 # Primary spoke distribution (default: all ManagedClusters except excludeManagedClusters; hub job lists clusters).

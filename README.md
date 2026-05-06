@@ -1,7 +1,7 @@
 
 # vp-manage-proxy-cluster-ca
 
-![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
+![Version: 0.1.1](https://img.shields.io/badge/Version-0.1.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
 
 Hub-side chart for OpenShift. With ACM (default), distributes a merged CA bundle to ManagedClusters via ManifestWork (default gather: API + ingress CAs; optional system trust store), including Proxy/cluster trustedCA on spokes unless turned off. API CA collection is tunable via includeApiCA (default true). Set acm.enabled false for a standalone cluster: gather hub-local CA inputs and manage local Proxy/ConfigMap without ACM APIs. ACM Policy + PlacementBinding (when acm.enabled) add Governance visibility with default inform remediation; they do not gate rollout. Override policy.* or excludeManagedClusters as needed.
 
@@ -191,7 +191,7 @@ flowchart TB
 
 | `managedClusterCaSource` | Spoke trust material | Hub gather uses import kubeconfig? | Notes |
 |-------------------------|----------------------|-----------------------------------|--------|
-| **`spokePush`** | Per spoke: **`kube-apiserver-server-ca`** (or SA CA), **`router-ca`** if **`includeIngressCA`**, **`trusted-ca-bundle`** if **`includeSystemTrustStore`** | **No** (reads `bundle-*` on hub) | Spokes use short-lived hub token + API URL + hub CA in a Secret; **`spokePush.hubApiServer`** if spokes cannot use the gather pod’s API URL. |
+| **`spokePush`** | Per spoke: **`kube-apiserver-server-ca`** (or SA CA), **`router-ca`** if **`includeIngressCA`**, **`trusted-ca-bundle`** if **`includeSystemTrustStore`** | **No** (reads `bundle-*` on hub) | Spokes use short-lived hub token + API URL + hub CA in a Secret. Empty **`spokePush.hubApiServer`**: kubeconfig **`cluster.server`**, then **`Infrastructure/cluster` `status.apiServerURL`**, then in-cluster **`KUBERNETES_SERVICE_*`**. Set **`hubApiServer`** explicitly if spokes need a different routable URL than those defaults. |
 | **`acm`** | **`ManagedCluster`** **client caBundle**; plus optional spoke pulls for API/ingress/system-trust when **import kubeconfig** exists | **Only** for the optional spoke pulls | Without import Secret, only hub-side **client caBundle** is merged for that cluster. |
 | **`spokeTrustedCaBundle`** | **kube-apiserver-server-ca**, **`router-ca`** if **`includeIngressCA`**, **`trusted-ca-bundle`** if **`includeSystemTrustStore`** | **Yes** | Same import Secret pattern as [opp-policy-chart](https://github.com/validatedpatterns/opp-policy-chart). |
 
@@ -212,7 +212,7 @@ distributeToSpokes: manifestwork
 spokePush:
   hubNamespace: vp-proxy-ca-bundles
   spokeNamespace: vp-proxy-ca-sync
-  # hubApiServer: "https://api.hub.example.com:6443"   # if spokes cannot reach in-cluster API URL
+  # hubApiServer: "https://api.hub.example.com:6443"   # only if auto-detected URL is wrong for your spokes
 ```
 
 **ACM API trust only, ManifestWork rollout** (lightweight; not a full spoke PKI mirror):
@@ -298,7 +298,7 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 | `configMapName` | ConfigMap in `openshift-config` holding `ca-bundle.crt` (default avoids clashing with `cluster-proxy-ca-bundle` if used elsewhere). |
 | `managedClusterLabelSelector` | Passed to `oc get managedclusters --selector=…` (empty = all). |
 | `excludeManagedClusters` | Space-separated names to skip (default empty = all clusters get bundle + Proxy ManifestWork). |
-| `managedClusterCaSource` | `spokePush` (default): per-spoke API + optional ingress + optional system trust pushed to hub. `acm`: **client caBundle** plus optional spoke pulls when import kubeconfig exists. `spokeTrustedCaBundle`: pull API + optional ingress + optional system trust via kubeconfig. Set `spokePush.hubApiServer` if spokes cannot use the gather pod’s API URL. |
+| `managedClusterCaSource` | `spokePush` (default): per-spoke API + optional ingress + optional system trust pushed to hub. `acm`: **client caBundle** plus optional spoke pulls when import kubeconfig exists. `spokeTrustedCaBundle`: pull API + optional ingress + optional system trust via kubeconfig. `spokePush.hubApiServer` overrides auto-detected hub API URL when needed for spoke reachability. |
 | `spokePush.*` | Hub namespace, spoke sync namespace, CronJob schedule, token duration, optional hub API override (`hubApiServer`). |
 | `distributeToSpokes` | `manifestwork` (default): `ManifestWork` in each cluster namespace. `kubeconfig`: apply/patch via import kubeconfig. |
 | `manifestWork.patchClusterProxy` | Adds `Proxy/cluster` `trustedCA` to the **same** spoke ManifestWork as the bundle (default true; set false if Policy or another process owns Proxy on spokes). |
@@ -378,7 +378,7 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 | securityContext.capabilities.drop[0] | string | `"ALL"` |  |
 | serviceAccount.create | bool | `true` |  |
 | serviceAccount.name | string | `""` |  |
-| spokePush.hubApiServer | string | `""` |  |
+| spokePush.hubApiServer | string | `""` | Hub API URL embedded in spoke push Secrets (reachable from every spoke). Empty: kubeconfig cluster.server, else OpenShift `Infrastructure/cluster` status.apiServerURL, else `https://KUBERNETES_SERVICE_HOST:PORT`. |
 | spokePush.hubNamespace | string | `"vp-proxy-ca-bundles"` |  |
 | spokePush.manifestWorkNameOverride | string | `""` |  |
 | spokePush.schedule | string | `"*/10 * * * *"` |  |

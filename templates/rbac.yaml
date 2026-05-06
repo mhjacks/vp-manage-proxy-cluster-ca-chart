@@ -25,6 +25,9 @@ rules:
   - apiGroups: ["config.openshift.io"]
     resources: ["proxies"]
     verbs: ["get", "patch"]
+  - apiGroups: ["config.openshift.io"]
+    resources: ["infrastructures"]
+    verbs: ["get"]
 {{- if .Values.acm.enabled }}
   - apiGroups: ["cluster.open-cluster-management.io"]
     resources: ["managedclusters"]

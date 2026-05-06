@@ -24,8 +24,17 @@ provision_spoke_push_manifestwork() {
   if [[ -z "$hub_server" ]]; then
     hub_server="$(oc config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true)"
   fi
+  # In-cluster gather pods often have no kubeconfig cluster.server; OpenShift publishes the canonical API URL here.
   if [[ -z "$hub_server" ]]; then
-    log "set SPOKE_PUSH_HUB_API_SERVER or ensure kubeconfig has cluster.server"
+    hub_server="$(oc get infrastructure cluster -o jsonpath='{.status.apiServerURL}' 2>/dev/null || true)"
+  fi
+  # Last resort: Kubernetes API as seen from this pod (works for same-cluster push, e.g. local-cluster).
+  if [[ -z "$hub_server" && -n "${KUBERNETES_SERVICE_HOST:-}" ]]; then
+    local kport="${KUBERNETES_SERVICE_PORT:-443}"
+    hub_server="https://${KUBERNETES_SERVICE_HOST}:${kport}"
+  fi
+  if [[ -z "$hub_server" ]]; then
+    log "set spokePush.hubApiServer (SPOKE_PUSH_HUB_API_SERVER), or ensure kubeconfig has cluster.server, or grant get on infrastructure cluster"
     return 1
   fi
   local ca_b64=""

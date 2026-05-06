@@ -8,7 +8,7 @@ description: >-
   ACM Policy + PlacementBinding (when acm.enabled) add Governance visibility with default inform remediation; they do not gate rollout.
   Override policy.* or excludeManagedClusters as needed.
 type: application
-version: 0.1.0
+version: 0.1.1
 keywords:
   - openshift
   - acm
