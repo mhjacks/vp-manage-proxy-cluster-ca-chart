@@ -1,7 +1,7 @@
 
 # vp-manage-proxy-cluster-ca
 
-![Version: 0.1.2](https://img.shields.io/badge/Version-0.1.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
+![Version: 0.1.3](https://img.shields.io/badge/Version-0.1.3-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
 
 Hub-side chart for OpenShift. With ACM (default), distributes a merged CA bundle to ManagedClusters via ManifestWork (default gather: API + ingress CAs; optional system trust store), including Proxy/cluster trustedCA on spokes unless turned off. API CA collection is tunable via includeApiCA (default true). Set acm.enabled false for a standalone cluster: gather hub-local CA inputs and manage local Proxy/ConfigMap without ACM APIs. ACM Policy + PlacementBinding (when acm.enabled) add Governance visibility with default inform remediation; they do not gate rollout. Override policy.* or excludeManagedClusters as needed.
 
@@ -57,6 +57,79 @@ Use on **standalone OpenShift** (no multicluster engine / no **ManagedCluster** 
 Use **`additionalCaBundles`** in **`values.yaml`** when you need PEMs in the **cluster-wide Proxy bundle** that are **not** already picked up from the normal inputs (hub and spoke **API CAs**, optional ingress CA, optional system trust, and **`managedClusterCaSource`**). Each entry is a **YAML string**; use a **block scalar** (`|`) so PEM line breaks stay valid. The gather job **merges** those PEMs with the rest of the material, then **de-duplicates by certificate fingerprint** before writing **`configMapName`** / **`ca-bundle.crt`**.
 
 **Relation to platform “injection”:** If another mechanism already puts your CA into the platform trust store (for example **Cluster Network Operator** **`inject-trusted-cabundle`** on a `ConfigMap`, or a **Vault / CSI** chart that feeds **`trusted-ca-bundle`**), enable **`includeSystemTrustStore: true`** to merge those certs. Keep it **false** (default) when you want the bundle focused on API + ingress trust only. Use **`additionalCaBundles`** for CAs that are outside both paths (for example a private issuer only published in Git). See the commented example PEM block in **`values.yaml`**.
+
+### Example: init container TLS precheck for workload HTTPS
+
+If your application calls an HTTPS endpoint (for example **HashiCorp Vault**) and must use the **same CA material** as the cluster-wide proxy bundle, mount **`ca-bundle.crt`** into the pod and optionally run an **init container** before the main containers start. Typical sources for that file are:
+
+- this chart’s merged bundle: copy or sync **`configMapName`** / **`ca-bundle.crt`** from **`openshift-config`** into your workload namespace, or
+- a **namespace** `ConfigMap` whose contents **CNO** populates via **`inject-trusted-cabundle`**, if you merge the cluster trust store that way.
+
+An init container can **wait** until the mounted path is non-empty (injection and **`Proxy`** rollout can lag pod schedule) and **verify TLS** with **`curl --cacert`**. For Vault, **`GET /v1/sys/health`** is enough to prove the TLS handshake; avoid **`curl -f`** because sealed or uninitialized Vault often returns a non-2xx **HTTP** status while TLS still succeeds.
+
+Below is an **illustrative** fragment: replace the **`ConfigMap`** name, mount path, image, and **`VAULT_ADDR`** with your own values; wire the same volume into your application container if it needs the bundle at runtime.
+
+```yaml
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: tls-precheck
+          image: registry.access.redhat.com/ubi9/ubi:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HTTPS_ENDPOINT
+              value: "https://vault.example.com"
+            - name: CA_BUNDLE_PATH
+              value: "/etc/pki/custom-ca/ca-bundle.crt"
+            - name: CA_WAIT_SECONDS
+              value: "120"
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              echo "Waiting up to ${CA_WAIT_SECONDS}s for CA bundle at ${CA_BUNDLE_PATH}"
+              for ((i=0; i<CA_WAIT_SECONDS; i++)); do
+                if [[ -s "${CA_BUNDLE_PATH}" ]]; then
+                  break
+                fi
+                sleep 1
+              done
+              if [[ ! -s "${CA_BUNDLE_PATH}" ]]; then
+                echo "ERROR: CA bundle missing or empty at ${CA_BUNDLE_PATH}" >&2
+                exit 1
+              fi
+              echo "Verifying TLS to ${HTTPS_ENDPOINT} using ${CA_BUNDLE_PATH}"
+              if ! curl -g -sS --cacert "${CA_BUNDLE_PATH}" --connect-timeout 15 --max-time 45 \
+                  -o /dev/null "${HTTPS_ENDPOINT}/v1/sys/health"; then
+                echo "ERROR: could not complete TLS connection (check CA bundle vs server certificate)" >&2
+                exit 1
+              fi
+              echo "TLS precheck passed."
+          volumeMounts:
+            - name: custom-ca-bundle
+              mountPath: /etc/pki/custom-ca
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+      volumes:
+        - name: custom-ca-bundle
+          projected:
+            defaultMode: 420
+            sources:
+              - configMap:
+                  name: my-workload-trusted-ca
+                  optional: true
+                  items:
+                    - key: ca-bundle.crt
+                      path: ca-bundle.crt
+```
 
 ### Distribution to managed clusters (defaults)
 

@@ -63,6 +63,79 @@ Use **`additionalCaBundles`** in **`values.yaml`** when you need PEMs in the **c
 
 **Relation to platform “injection”:** If another mechanism already puts your CA into the platform trust store (for example **Cluster Network Operator** **`inject-trusted-cabundle`** on a `ConfigMap`, or a **Vault / CSI** chart that feeds **`trusted-ca-bundle`**), enable **`includeSystemTrustStore: true`** to merge those certs. Keep it **false** (default) when you want the bundle focused on API + ingress trust only. Use **`additionalCaBundles`** for CAs that are outside both paths (for example a private issuer only published in Git). See the commented example PEM block in **`values.yaml`**.
 
+### Example: init container TLS precheck for workload HTTPS
+
+If your application calls an HTTPS endpoint (for example **HashiCorp Vault**) and must use the **same CA material** as the cluster-wide proxy bundle, mount **`ca-bundle.crt`** into the pod and optionally run an **init container** before the main containers start. Typical sources for that file are:
+
+- this chart’s merged bundle: copy or sync **`configMapName`** / **`ca-bundle.crt`** from **`openshift-config`** into your workload namespace, or
+- a **namespace** `ConfigMap` whose contents **CNO** populates via **`inject-trusted-cabundle`**, if you merge the cluster trust store that way.
+
+An init container can **wait** until the mounted path is non-empty (injection and **`Proxy`** rollout can lag pod schedule) and **verify TLS** with **`curl --cacert`**. For Vault, **`GET /v1/sys/health`** is enough to prove the TLS handshake; avoid **`curl -f`** because sealed or uninitialized Vault often returns a non-2xx **HTTP** status while TLS still succeeds.
+
+Below is an **illustrative** fragment: replace the **`ConfigMap`** name, mount path, image, and **`VAULT_ADDR`** with your own values; wire the same volume into your application container if it needs the bundle at runtime.
+
+```yaml
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: tls-precheck
+          image: registry.access.redhat.com/ubi9/ubi:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HTTPS_ENDPOINT
+              value: "https://vault.example.com"
+            - name: CA_BUNDLE_PATH
+              value: "/etc/pki/custom-ca/ca-bundle.crt"
+            - name: CA_WAIT_SECONDS
+              value: "120"
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              echo "Waiting up to ${CA_WAIT_SECONDS}s for CA bundle at ${CA_BUNDLE_PATH}"
+              for ((i=0; i<CA_WAIT_SECONDS; i++)); do
+                if [[ -s "${CA_BUNDLE_PATH}" ]]; then
+                  break
+                fi
+                sleep 1
+              done
+              if [[ ! -s "${CA_BUNDLE_PATH}" ]]; then
+                echo "ERROR: CA bundle missing or empty at ${CA_BUNDLE_PATH}" >&2
+                exit 1
+              fi
+              echo "Verifying TLS to ${HTTPS_ENDPOINT} using ${CA_BUNDLE_PATH}"
+              if ! curl -g -sS --cacert "${CA_BUNDLE_PATH}" --connect-timeout 15 --max-time 45 \
+                  -o /dev/null "${HTTPS_ENDPOINT}/v1/sys/health"; then
+                echo "ERROR: could not complete TLS connection (check CA bundle vs server certificate)" >&2
+                exit 1
+              fi
+              echo "TLS precheck passed."
+          volumeMounts:
+            - name: custom-ca-bundle
+              mountPath: /etc/pki/custom-ca
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+      volumes:
+        - name: custom-ca-bundle
+          projected:
+            defaultMode: 420
+            sources:
+              - configMap:
+                  name: my-workload-trusted-ca
+                  optional: true
+                  items:
+                    - key: ca-bundle.crt
+                      path: ca-bundle.crt
+```
+
 ### Distribution to managed clusters (defaults)
 
 The default path is **`distributeToSpokes: manifestwork`**: the gather **CronJob/Job** lists hub **ManagedCluster** objects (respecting **`managedClusterLabelSelector`** and **`excludeManagedClusters`**), then applies **ManifestWork** in each cluster namespace so the **work agent** reconciles the merged **ConfigMap** and (unless disabled) **`Proxy/cluster` `trustedCA`**. When **`manifestWork.patchClusterProxy`** is **true**, **`manifestWork.grantKlusterletProxyPatchRBAC`** (default **true**) prepends a **ClusterRole** + **ClusterRoleBinding** on the spoke so **`system:serviceaccount:open-cluster-management-agent:klusterlet-work-sa`** can **patch** **`proxies/cluster`** (OpenShift often denies that by default). That is the chart’s primary “distribute to spokes” behavior. **ManifestWork for the managed cluster name `local-cluster` is skipped** because the hub copy is already applied in-cluster.
@@ -330,6 +403,7 @@ If you use **`distributeToSpokes: kubeconfig`** or **`managedClusterCaSource: sp
 - **`acm.enabled`**: set **`false`** for standalone hubs to manage **only** the local **Proxy** bundle without **ManagedCluster** / **ManifestWork** / Governance objects from this chart.
 - **Gather defaults**: API CAs are on by default (**`includeApiCA: true`**) and use fallbacks (**`kube-apiserver-server-ca`** / **`kube-root-ca.crt`** / kubeconfig CA data). Ingress CAs are on by default (**`includeIngressCA: true`**). **`trusted-ca-bundle`** (system trust store) is opt-in via **`includeSystemTrustStore: true`**.
 - When **`includeIngressCA`** is **true**, render a **Role** + **RoleBinding** in **`openshift-ingress-operator`** so the gather **ServiceAccount** can **`get`** **`Secret/router-ca`** (previously only **ClusterRole** **Secrets** applied under **`acm.enabled`** + kubeconfig/spokeTrusted paths, so **hub-only** and default **`spokePush`** hubs skipped ingress silently). The gather script logs a **warning** if ingress was requested but no PEM was written.
+- v0.1.3: Add documentation about using an init container to validate TLS if needed/desired. This is due to potential timing considerations between CA injection and pod starting.
 
 {{ template "chart.homepageLine" . }}
 
