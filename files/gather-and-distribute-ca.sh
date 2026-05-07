@@ -349,25 +349,14 @@ patch_proxy_trusted_ca() {
   log "Proxy trustedCA set on ${label}"
 }
 
-bundle_to_single_line_b64() {
-  local bundle="$1"
-  local out="$2"
-  if openssl base64 -A -in "$bundle" -out "$out" 2>/dev/null; then
-    return 0
-  fi
-  { base64 <"$bundle" 2>/dev/null || base64 "$bundle"; } | tr -d '\n' >"$out"
-}
-
 # One ManifestWork per cluster so workload.manifests apply in list order: optional klusterlet RBAC,
 # then ConfigMap, then Proxy (ConfigMap must exist before Proxy references it). Two separate
 # ManifestWorks can reconcile out of order and leave spec.trustedCA unset or rejected on the spoke.
 apply_manifestwork_spoke_rollout() {
   local cluster="$1"
   local bundle="$2"
-  local b64file="$WORK_DIR/mw-${cluster}.b64"
-  bundle_to_single_line_b64 "$bundle" "$b64file"
-  local b64
-  b64="$(cat "$b64file")"
+  local bundle_block
+  bundle_block="$(sed 's/^/            /' "$bundle")"
   local tmp="$WORK_DIR/mw-${cluster}.yaml"
   local rbac_block=""
   local log_suffix=""
@@ -430,7 +419,8 @@ ${rbac_block}
           name: ${CONFIG_MAP_NAME}
           namespace: ${TARGET_NAMESPACE}
         data:
-          ca-bundle.crt: "${b64}"
+          ca-bundle.crt: |
+${bundle_block}
       - apiVersion: config.openshift.io/v1
         kind: Proxy
         metadata:
@@ -456,7 +446,8 @@ spec:
           name: ${CONFIG_MAP_NAME}
           namespace: ${TARGET_NAMESPACE}
         data:
-          ca-bundle.crt: "${b64}"
+          ca-bundle.crt: |
+${bundle_block}
 EOF
     log "ManifestWork ${cluster}/${MANIFEST_WORK_NAME} apply (ConfigMap only)"
   fi
