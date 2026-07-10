@@ -392,7 +392,7 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | eso.externalSecret.argoCDSyncWave | int | `11` | Argo CD sync-wave (after PushSecret writes this cluster's property to Vault). |
 | eso.externalSecret.enabled | bool | `true` | ExternalSecret in trustManager.trustNamespace importing all spoke CAs from Vault. |
 | eso.externalSecret.name | string | `"cluster-ca-pushsecrets-import"` |  |
-| eso.externalSecret.refreshInterval | string | `"1h"` |  |
+| eso.externalSecret.refreshInterval | string | `"1m30s"` |  |
 | eso.externalSecret.targetSecretName | string | `"cluster-ca-pushsecrets-import"` |  |
 | eso.externalSecret.vaultKey | string | `""` | Vault KV path for dataFrom.extract. Empty: use eso.vault.remoteKey (pushsecrets/cluster-ca). Do not use secret/data/ prefix when ClusterSecretStore path is already "secret" (KV v2). |
 | eso.hubExport.secretName | string | `"cluster-ca-hub"` | Hub-only Secret in trustNamespace written by the gather CronJob (labels.hubExport). |

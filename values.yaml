@@ -131,7 +131,7 @@ eso:
     enabled: true
     name: cluster-ca-pushsecrets-import
     targetSecretName: cluster-ca-pushsecrets-import
-    refreshInterval: 1h
+    refreshInterval: 1m30s
     # -- Vault KV path for dataFrom.extract. Empty: use eso.vault.remoteKey (pushsecrets/cluster-ca).
     # Do not use secret/data/ prefix when ClusterSecretStore path is already "secret" (KV v2).
     vaultKey: ""
