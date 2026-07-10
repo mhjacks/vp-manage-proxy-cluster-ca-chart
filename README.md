@@ -413,7 +413,7 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | includeIngressCA | bool | `true` | Include default ingress router-ca PEMs when API access allows. |
 | includeSystemTrustStore | bool | `false` | Include cluster system trust store (trusted-ca-bundle) in export merges. |
 | nameOverride | string | `""` |  |
-| namespace | string | `"vp-manage-proxycluster-ca"` |  |
+| namespace | string | `"vp-manage-proxy-cluster-ca"` |  |
 | podHostUsers | bool | `false` |  |
 | podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | resources.limits.cpu | string | `"1"` |  |

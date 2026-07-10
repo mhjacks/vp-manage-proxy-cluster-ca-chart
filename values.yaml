@@ -1,6 +1,6 @@
 ---
 # Namespace for the hub CronJob/Job, RBAC, and script ConfigMap.
-namespace: vp-manage-proxycluster-ca
+namespace: vp-manage-proxy-cluster-ca
 
 # Clustergroup passthrough (config-demo pattern); eso.secretStore overrides when set.
 secretStore:
