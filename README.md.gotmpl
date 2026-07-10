@@ -248,6 +248,29 @@ applications:
 | `additionalCaBundles` | Extra PEMs as **Bundle** **`inLine`** sources. |
 | `cronJob` / `syncJob` | Hub periodic **hub-export** + **Proxy** patch; all clusters one-shot **Proxy** patch. |
 
+### Troubleshooting: PushSecret `could not get source secret`
+
+**PushSecret** reads the local **`cluster-ca-export`** **Secret** in **`eso.export.namespace`**. That **Secret** is created by **`export-cron.sh`**, not by **PushSecret** itself.
+
+Sync order (Argo CD waves):
+
+| Wave | Resource |
+|------|----------|
+| 8 | Export namespace, RBAC, ConfigMap, CronJob |
+| 9 | **Export sync Job** (Argo **`hook: Sync`**) — creates **`cluster-ca-export`** |
+| 10 | **ExternalSecret** (needs **`vault-backend`** Ready) |
+| 11 | **PushSecret** (needs local **Secret** + **`vault-backend`**) |
+
+If **PushSecret** shows **`could not get source secret`**, the export Job has not succeeded yet:
+
+```bash
+oc get secret cluster-ca-export -n vp-proxy-ca-sync
+oc get jobs -n vp-proxy-ca-sync -l app.kubernetes.io/component=eso-export
+oc logs -n vp-proxy-ca-sync job/$(oc get jobs -n vp-proxy-ca-sync -o name | grep export | head -1 | cut -d/ -f2)
+```
+
+**`apiVersion: external-secrets.io/v1alpha1`** for **PushSecret** is expected (upstream ESO API). **ExternalSecret** uses **`v1`**.
+
 ### Troubleshooting: `ClusterSecretStore vault-backend is not ready`
 
 **ExternalSecret** and **PushSecret** stay **Degraded** until the platform **ClusterSecretStore** is **Ready**. This chart does not create **vault-backend**; the **openshift-external-secrets** Application does.

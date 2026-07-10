@@ -243,6 +243,29 @@ applications:
 | `additionalCaBundles` | Extra PEMs as **Bundle** **`inLine`** sources. |
 | `cronJob` / `syncJob` | Hub periodic **hub-export** + **Proxy** patch; all clusters one-shot **Proxy** patch. |
 
+### Troubleshooting: PushSecret `could not get source secret`
+
+**PushSecret** reads the local **`cluster-ca-export`** **Secret** in **`eso.export.namespace`**. That **Secret** is created by **`export-cron.sh`**, not by **PushSecret** itself.
+
+Sync order (Argo CD waves):
+
+| Wave | Resource |
+|------|----------|
+| 8 | Export namespace, RBAC, ConfigMap, CronJob |
+| 9 | **Export sync Job** (Argo **`hook: Sync`**) — creates **`cluster-ca-export`** |
+| 10 | **ExternalSecret** (needs **`vault-backend`** Ready) |
+| 11 | **PushSecret** (needs local **Secret** + **`vault-backend`**) |
+
+If **PushSecret** shows **`could not get source secret`**, the export Job has not succeeded yet:
+
+```bash
+oc get secret cluster-ca-export -n vp-proxy-ca-sync
+oc get jobs -n vp-proxy-ca-sync -l app.kubernetes.io/component=eso-export
+oc logs -n vp-proxy-ca-sync job/$(oc get jobs -n vp-proxy-ca-sync -o name | grep export | head -1 | cut -d/ -f2)
+```
+
+**`apiVersion: external-secrets.io/v1alpha1`** for **PushSecret** is expected (upstream ESO API). **ExternalSecret** uses **`v1`**.
+
 ### Troubleshooting: `ClusterSecretStore vault-backend is not ready`
 
 **ExternalSecret** and **PushSecret** stay **Degraded** until the platform **ClusterSecretStore** is **Ready**. This chart does not create **vault-backend**; the **openshift-external-secrets** Application does.
@@ -301,20 +324,25 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | cronJob.schedule | string | `"*/10 * * * *"` |  |
 | cronJob.successfulJobsHistoryLimit | int | `1` |  |
 | cronJob.suspend | bool | `false` |  |
-| eso.argoCDSyncWave | int | `10` | Argo CD sync-wave for ExternalSecret/PushSecret (defer until platform ESO creates vault-backend). |
-| eso.export.enabled | bool | `true` | When true, render export namespace, CronJob, and PushSecret on this cluster. |
+| eso.argoCDSyncWave | int | `10` | Default Argo CD sync-wave for ExternalSecret when externalSecret.argoCDSyncWave is unset. |
+| eso.export.argoCDSyncWave | int | `8` | Argo CD sync-wave for export namespace/RBAC/CronJob (before export sync Job). |
+| eso.export.enabled | bool | `true` | When true, render export namespace, CronJob, sync Job, and PushSecret on this cluster. |
 | eso.export.key | string | `"ca-bundle.crt"` |  |
 | eso.export.namespace | string | `"vp-proxy-ca-sync"` |  |
 | eso.export.schedule | string | `"*/10 * * * *"` |  |
 | eso.export.secretName | string | `"cluster-ca-export"` |  |
 | eso.export.serviceAccountName | string | `"vp-proxy-ca-exporter"` |  |
+| eso.export.syncJob.argoCDSyncWave | int | `9` |  |
+| eso.export.syncJob.enabled | bool | `true` | One-shot Job (Argo Sync hook) that creates cluster-ca-export before PushSecret reconciles. |
 | eso.export.vaultProperty | string | `""` | Vault property name (defaults to global.clusterDomain). |
+| eso.externalSecret.argoCDSyncWave | int | `10` | Argo CD sync-wave (after vault-backend Ready; before PushSecret). |
 | eso.externalSecret.enabled | bool | `true` | ExternalSecret in trustManager.trustNamespace importing all spoke CAs from Vault. |
 | eso.externalSecret.name | string | `"cluster-ca-pushsecrets-import"` |  |
 | eso.externalSecret.refreshInterval | string | `"1h"` |  |
 | eso.externalSecret.targetSecretName | string | `"cluster-ca-pushsecrets-import"` |  |
 | eso.externalSecret.vaultKey | string | `"secret/data/pushsecrets/cluster-ca"` |  |
 | eso.hubExport.secretName | string | `"cluster-ca-hub"` | Hub-only Secret in trustNamespace written by the gather CronJob (labels.hubExport). |
+| eso.pushSecret.argoCDSyncWave | int | `11` | Argo CD sync-wave (after export sync Job creates the local Secret). |
 | eso.pushSecret.deletionPolicy | string | `"None"` |  |
 | eso.pushSecret.name | string | `"cluster-ca-export"` |  |
 | eso.pushSecret.refreshInterval | string | `"1m30s"` |  |

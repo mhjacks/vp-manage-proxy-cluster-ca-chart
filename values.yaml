@@ -77,7 +77,7 @@ syncJob:
 # Vault paths and policies: rhvp.cluster_utils (make load-secrets).
 # Prerequisites: openshift-external-secrets Application Healthy and ClusterSecretStore vault-backend Ready.
 eso:
-  # -- Argo CD sync-wave for ExternalSecret/PushSecret (defer until platform ESO creates vault-backend).
+  # -- Default Argo CD sync-wave for ExternalSecret when externalSecret.argoCDSyncWave is unset.
   argoCDSyncWave: 10
   secretStore:
     # -- ClusterSecretStore name. Empty: use secretStore.name (clustergroup), global.secretStore.name, else vault-backend.
@@ -87,8 +87,10 @@ eso:
     # -- PushSecret remoteKey (KV v2 path relative to ClusterSecretStore mount).
     remoteKey: pushsecrets/cluster-ca
   export:
-    # -- When true, render export namespace, CronJob, and PushSecret on this cluster.
+    # -- When true, render export namespace, CronJob, sync Job, and PushSecret on this cluster.
     enabled: true
+    # -- Argo CD sync-wave for export namespace/RBAC/CronJob (before export sync Job).
+    argoCDSyncWave: 8
     namespace: vp-proxy-ca-sync
     serviceAccountName: vp-proxy-ca-exporter
     # -- Vault property name (defaults to global.clusterDomain).
@@ -96,11 +98,17 @@ eso:
     secretName: cluster-ca-export
     key: ca-bundle.crt
     schedule: "*/10 * * * *"
+    syncJob:
+      # -- One-shot Job (Argo Sync hook) that creates cluster-ca-export before PushSecret reconciles.
+      enabled: true
+      argoCDSyncWave: 9
   pushSecret:
     name: cluster-ca-export
     refreshInterval: 1m30s
     updatePolicy: Replace
     deletionPolicy: None
+    # -- Argo CD sync-wave (after export sync Job creates the local Secret).
+    argoCDSyncWave: 11
   hubExport:
     # -- Hub-only Secret in trustNamespace written by the gather CronJob (labels.hubExport).
     secretName: cluster-ca-hub
@@ -111,6 +119,8 @@ eso:
     targetSecretName: cluster-ca-pushsecrets-import
     refreshInterval: 1h
     vaultKey: secret/data/pushsecrets/cluster-ca
+    # -- Argo CD sync-wave (after vault-backend Ready; before PushSecret).
+    argoCDSyncWave: 10
 
 # -- Include API CA PEMs in hub-export and spoke export (default true).
 includeApiCA: true

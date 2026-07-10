@@ -147,10 +147,25 @@ ClusterSecretStore
 {{- end }}
 
 {{/*
-Argo CD sync-wave for ESO resources (defer until openshift-external-secrets creates vault-backend).
+Argo CD sync-wave for ESO export infrastructure (namespace, CronJob, etc.).
 */}}
-{{- define "vpProxyCa.esoArgoSyncWaveAnnotations" -}}
-{{- if .Values.eso.argoCDSyncWave }}
-argocd.argoproj.io/sync-wave: {{ .Values.eso.argoCDSyncWave | quote }}
-{{- end -}}
+{{- define "vpProxyCa.esoExportSyncWaveAnnotations" -}}
+{{- $wave := .Values.eso.export.argoCDSyncWave | default 8 }}
+argocd.argoproj.io/sync-wave: {{ $wave | quote }}
+{{- end }}
+
+{{/*
+Argo CD sync-wave for ExternalSecret (after vault-backend and export Job).
+*/}}
+{{- define "vpProxyCa.esoExternalSecretSyncWaveAnnotations" -}}
+{{- $wave := .Values.eso.externalSecret.argoCDSyncWave | default .Values.eso.argoCDSyncWave | default 10 }}
+argocd.argoproj.io/sync-wave: {{ $wave | quote }}
+{{- end }}
+
+{{/*
+Argo CD sync-wave for PushSecret (after local export Secret exists).
+*/}}
+{{- define "vpProxyCa.esoPushSecretSyncWaveAnnotations" -}}
+{{- $wave := .Values.eso.pushSecret.argoCDSyncWave | default 11 }}
+argocd.argoproj.io/sync-wave: {{ $wave | quote }}
 {{- end }}

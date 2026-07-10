@@ -1,0 +1,42 @@
+suite: eso export job
+templates:
+  - eso-export-job.yaml
+release:
+  name: testrel
+tests:
+  - it: does not render when export syncJob is disabled
+    set:
+      eso:
+        export:
+          enabled: true
+          syncJob:
+            enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: renders export Job with Argo Sync hook at wave 9
+    set:
+      eso:
+        export:
+          enabled: true
+          syncJob:
+            enabled: true
+            argoCDSyncWave: 9
+    asserts:
+      - isKind:
+          of: Job
+      - equal:
+          path: metadata.namespace
+          value: vp-proxy-ca-sync
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/hook"]
+          value: Sync
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "9"
+      - equal:
+          path: spec.template.spec.containers[0].env[2].name
+          value: EXPORT_SECRET_NAME
+      - equal:
+          path: spec.template.spec.containers[0].env[2].value
+          value: cluster-ca-export
