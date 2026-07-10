@@ -15,7 +15,7 @@ fullnameOverride: ""
 
 image:
   repository: quay.io/validatedpatterns/imperative-container
-  tag: latest
+  tag: v1
   pullPolicy: IfNotPresent
 
 # ConfigMap in vp-manage-proxycluster-ca holding ca-bundle.crt for cluster Proxy trustedCA.

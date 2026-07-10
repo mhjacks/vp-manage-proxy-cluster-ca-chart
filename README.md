@@ -354,7 +354,7 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | hubCluster | string | `""` |  |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
 | image.repository | string | `"quay.io/validatedpatterns/imperative-container"` |  |
-| image.tag | string | `"latest"` |  |
+| image.tag | string | `"v1"` |  |
 | includeApiCA | bool | `true` | Include API CA PEMs in hub-export and spoke export (default true). |
 | includeIngressCA | bool | `true` | Include default ingress router-ca PEMs when API access allows. |
 | includeSystemTrustStore | bool | `false` | Include cluster system trust store (trusted-ca-bundle) in export merges. |
