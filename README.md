@@ -304,7 +304,7 @@ applications:
 | includeIngressCA | bool | `true` | Include default ingress router-ca PEMs when API access allows. |
 | includeSystemTrustStore | bool | `false` | Include cluster system trust store (trusted-ca-bundle) in export merges. |
 | nameOverride | string | `""` |  |
-| namespace | string | `"openshift-config"` |  |
+| namespace | string | `"vp-manage-proxycluster-ca"` |  |
 | podSecurityContext.runAsGroup | int | `0` |  |
 | podSecurityContext.runAsNonRoot | bool | `true` |  |
 | podSecurityContext.runAsUser | int | `1000690001` |  |

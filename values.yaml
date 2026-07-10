@@ -1,6 +1,6 @@
 ---
 # Namespace for the hub CronJob/Job, RBAC, and script ConfigMap.
-namespace: openshift-config
+namespace: vp-manage-proxycluster-ca
 
 # Hub vs spoke: auto-detect from global.localClusterDomain == global.hubClusterDomain (VP GitOps).
 # Override with true|false when deploying outside a clustergroup.
@@ -14,7 +14,7 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
-# ConfigMap in openshift-config holding ca-bundle.crt for cluster Proxy trustedCA.
+# ConfigMap in vp-manage-proxycluster-ca holding ca-bundle.crt for cluster Proxy trustedCA.
 configMapName: vp-pattern-proxy-ca-bundle
 targetNamespace: openshift-config
 
