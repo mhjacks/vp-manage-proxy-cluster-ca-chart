@@ -91,7 +91,7 @@ eso:
     schedule: "*/10 * * * *"
   pushSecret:
     name: cluster-ca-export
-    refreshInterval: 1h
+    refreshInterval: 1m30s
     updatePolicy: Replace
     deletionPolicy: None
   hubExport:

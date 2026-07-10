@@ -290,7 +290,7 @@ applications:
 | eso.hubExport.secretName | string | `"cluster-ca-hub"` | Hub-only Secret in trustNamespace written by the gather CronJob (labels.hubExport). |
 | eso.pushSecret.deletionPolicy | string | `"None"` |  |
 | eso.pushSecret.name | string | `"cluster-ca-export"` |  |
-| eso.pushSecret.refreshInterval | string | `"1h"` |  |
+| eso.pushSecret.refreshInterval | string | `"1m30s"` |  |
 | eso.pushSecret.updatePolicy | string | `"Replace"` |  |
 | eso.secretStore.kind | string | `"ClusterSecretStore"` |  |
 | eso.secretStore.name | string | `""` | ClusterSecretStore name. Empty: use global.secretStore.name from clustergroup, else vault-backend. |
