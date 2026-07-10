@@ -111,10 +111,22 @@ Vault property for PushSecret (cluster identity in pushsecrets/cluster-ca).
 {{- end }}
 
 {{/*
-Shared Vault remoteKey for spoke PushSecret / hub ExternalSecret dataFrom.extract.
+Shared Vault remoteKey for PushSecret and ExternalSecret dataFrom.extract (relative to ClusterSecretStore mount).
 */}}
 {{- define "vpProxyCa.esoVaultRemoteKey" -}}
 {{- .Values.eso.vault.remoteKey | default "pushsecrets/cluster-ca" -}}
+{{- end }}
+
+{{/*
+Vault KV path for ExternalSecret dataFrom.extract (relative to ClusterSecretStore mount, same as PushSecret remoteKey).
+Do not prefix with secret/data/ when the store path is already "secret" (KV v2).
+*/}}
+{{- define "vpProxyCa.esoVaultExtractKey" -}}
+{{- if .Values.eso.externalSecret.vaultKey -}}
+{{- .Values.eso.externalSecret.vaultKey -}}
+{{- else -}}
+{{- include "vpProxyCa.esoVaultRemoteKey" . -}}
+{{- end -}}
 {{- end }}
 
 {{/*

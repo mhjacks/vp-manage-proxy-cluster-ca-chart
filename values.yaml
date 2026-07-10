@@ -86,8 +86,8 @@ syncJob:
 # Vault paths and policies: rhvp.cluster_utils (make load-secrets).
 # Prerequisites: openshift-external-secrets Application Healthy and ClusterSecretStore vault-backend Ready.
 eso:
-  # -- Default Argo CD sync-wave for ExternalSecret when externalSecret.argoCDSyncWave is unset.
-  argoCDSyncWave: 10
+  # -- Default Argo CD sync-wave for ExternalSecret when externalSecret.argoCDSyncWave is unset (after PushSecret).
+  argoCDSyncWave: 11
   secretStore:
     # -- ClusterSecretStore name. Empty: use secretStore.name (clustergroup), global.secretStore.name, else vault-backend.
     name: ""
@@ -121,8 +121,8 @@ eso:
     refreshInterval: 1m30s
     updatePolicy: Replace
     deletionPolicy: None
-    # -- Argo CD sync-wave (after export sync Job creates the local Secret).
-    argoCDSyncWave: 11
+    # -- Argo CD sync-wave (after export sync Job creates the local Secret; before ExternalSecret).
+    argoCDSyncWave: 10
   hubExport:
     # -- Hub-only Secret in trustNamespace written by the gather CronJob (labels.hubExport).
     secretName: cluster-ca-hub
@@ -132,9 +132,11 @@ eso:
     name: cluster-ca-pushsecrets-import
     targetSecretName: cluster-ca-pushsecrets-import
     refreshInterval: 1h
-    vaultKey: secret/data/pushsecrets/cluster-ca
-    # -- Argo CD sync-wave (after vault-backend Ready; before PushSecret).
-    argoCDSyncWave: 10
+    # -- Vault KV path for dataFrom.extract. Empty: use eso.vault.remoteKey (pushsecrets/cluster-ca).
+    # Do not use secret/data/ prefix when ClusterSecretStore path is already "secret" (KV v2).
+    vaultKey: ""
+    # -- Argo CD sync-wave (after PushSecret writes this cluster's property to Vault).
+    argoCDSyncWave: 11
 
 # -- Include API CA PEMs in hub-export and spoke export (default true).
 includeApiCA: true

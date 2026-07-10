@@ -92,7 +92,7 @@ spec:
           cluster-ca.vp.io/component: export
   dataFrom:
     - extract:
-        key: secret/data/pushsecrets/cluster-ca
+        key: pushsecrets/cluster-ca
 ```
 
 Set **`hubCluster: true|false`** when auto-detection from **`global.localClusterDomain`** / **`global.hubClusterDomain`** is unavailable.
@@ -253,8 +253,8 @@ Sync order (Argo CD waves):
 |------|----------|
 | 8 | Export namespace, RBAC, ConfigMap, CronJob |
 | 9 | **Export sync Job** (Argo **`hook: Sync`**) — creates **`cluster-ca-export`** |
-| 10 | **ExternalSecret** (needs **`vault-backend`** Ready) |
-| 11 | **PushSecret** (needs local **Secret** + **`vault-backend`**) |
+| 10 | **PushSecret** (needs local **Secret** + **`vault-backend`**) — writes **`pushsecrets/cluster-ca#<clusterDomain>`** |
+| 11 | **ExternalSecret** (needs **`vault-backend`** Ready + at least one **PushSecret** write) |
 | 12 | **Proxy patch sync Job** (Argo **`hook: Sync`**) — hub **`hub-export`** + **`Proxy/cluster`** |
 
 If **PushSecret** shows **`could not get source secret`**, the export Job has not succeeded yet (see export Job logs). Export Jobs use **`registry.redhat.io/openshift4/ose-cli`** by default — not **`imperative-container`** (root USER + **`hostUsers: false`** causes **`setgroups: Invalid argument`** on restricted-v3).
@@ -293,6 +293,32 @@ oc logs -n vp-proxy-ca-sync job/$(oc get jobs -n vp-proxy-ca-sync -o name | grep
 
 **`apiVersion: external-secrets.io/v1alpha1`** for **PushSecret** is expected (upstream ESO API). **ExternalSecret** uses **`v1`**.
 
+### Troubleshooting: ExternalSecret `Secret does not exist`
+
+```text
+error processing spec.dataFrom[0].extract, err: Secret does not exist
+```
+
+Two common causes:
+
+1. **PushSecret has not written yet** — **ExternalSecret** runs at sync **wave 11**, after **PushSecret** (wave **10**). On first sync, confirm **PushSecret** is **Synced** and check Vault:
+
+```bash
+oc get pushsecret cluster-ca-export -n vp-proxy-ca-sync
+oc describe pushsecret cluster-ca-export -n vp-proxy-ca-sync
+# Hub Vault (adjust namespace/pod): property name = global.clusterDomain
+oc exec -n vault vault-0 -- vault kv get secret/pushsecrets/cluster-ca
+```
+
+2. **Wrong Vault path in ExternalSecret** — **`dataFrom.extract.key`** must match **PushSecret** **`remoteKey`** (**`pushsecrets/cluster-ca`**, relative to the **`vault-backend`** mount **`secret`**). Do **not** use **`secret/data/pushsecrets/cluster-ca`** unless your **ClusterSecretStore** is configured differently.
+
+After **PushSecret** succeeds, force **ExternalSecret** reconciliation:
+
+```bash
+oc annotate externalsecret cluster-ca-pushsecrets-import -n cert-manager \
+  force-sync=$(date +%s) --overwrite
+```
+
 ### Troubleshooting: `ClusterSecretStore vault-backend is not ready`
 
 **ExternalSecret** and **PushSecret** stay **Degraded** until the platform **ClusterSecretStore** is **Ready**. This chart does not create **vault-backend**; the **openshift-external-secrets** Application does.
@@ -304,7 +330,7 @@ oc get clustersecretstore vault-backend
 oc describe clustersecretstore vault-backend
 ```
 
-2. Ensure **openshift-external-secrets** is **Synced/Healthy** before this chart (this chart sets **`eso.argoCDSyncWave: 10`** on **ExternalSecret** / **PushSecret** for that reason).
+2. Ensure **openshift-external-secrets** is **Synced/Healthy** before this chart (**PushSecret** wave **10**, **ExternalSecret** wave **11**).
 
 3. **Hub:** **vault** Application must be running; **ClusterSecretStore** uses **`https://vault-vault.<hubClusterDomain>`** with Kubernetes auth **`hub`** mount / **`hub-role`**.
 
@@ -351,7 +377,7 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | cronJob.schedule | string | `"*/10 * * * *"` |  |
 | cronJob.successfulJobsHistoryLimit | int | `1` |  |
 | cronJob.suspend | bool | `false` |  |
-| eso.argoCDSyncWave | int | `10` | Default Argo CD sync-wave for ExternalSecret when externalSecret.argoCDSyncWave is unset. |
+| eso.argoCDSyncWave | int | `11` | Default Argo CD sync-wave for ExternalSecret when externalSecret.argoCDSyncWave is unset (after PushSecret). |
 | eso.export.argoCDSyncWave | int | `8` | Argo CD sync-wave for export namespace/RBAC/CronJob (before export sync Job). |
 | eso.export.enabled | bool | `true` | When true, render export namespace, CronJob, sync Job, and PushSecret on this cluster. |
 | eso.export.image | object | `{"pullPolicy":"IfNotPresent","repository":"registry.redhat.io/openshift4/ose-cli","tag":"latest"}` | Image for export Jobs (ose-cli avoids setgroups errors from root-based imperative-container). |
@@ -363,14 +389,14 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | eso.export.syncJob.argoCDSyncWave | int | `9` |  |
 | eso.export.syncJob.enabled | bool | `true` | One-shot Job (Argo Sync hook) that creates cluster-ca-export before PushSecret reconciles. |
 | eso.export.vaultProperty | string | `""` | Vault property name (defaults to global.clusterDomain). |
-| eso.externalSecret.argoCDSyncWave | int | `10` | Argo CD sync-wave (after vault-backend Ready; before PushSecret). |
+| eso.externalSecret.argoCDSyncWave | int | `11` | Argo CD sync-wave (after PushSecret writes this cluster's property to Vault). |
 | eso.externalSecret.enabled | bool | `true` | ExternalSecret in trustManager.trustNamespace importing all spoke CAs from Vault. |
 | eso.externalSecret.name | string | `"cluster-ca-pushsecrets-import"` |  |
 | eso.externalSecret.refreshInterval | string | `"1h"` |  |
 | eso.externalSecret.targetSecretName | string | `"cluster-ca-pushsecrets-import"` |  |
-| eso.externalSecret.vaultKey | string | `"secret/data/pushsecrets/cluster-ca"` |  |
+| eso.externalSecret.vaultKey | string | `""` | Vault KV path for dataFrom.extract. Empty: use eso.vault.remoteKey (pushsecrets/cluster-ca). Do not use secret/data/ prefix when ClusterSecretStore path is already "secret" (KV v2). |
 | eso.hubExport.secretName | string | `"cluster-ca-hub"` | Hub-only Secret in trustNamespace written by the gather CronJob (labels.hubExport). |
-| eso.pushSecret.argoCDSyncWave | int | `11` | Argo CD sync-wave (after export sync Job creates the local Secret). |
+| eso.pushSecret.argoCDSyncWave | int | `10` | Argo CD sync-wave (after export sync Job creates the local Secret; before ExternalSecret). |
 | eso.pushSecret.deletionPolicy | string | `"None"` |  |
 | eso.pushSecret.name | string | `"cluster-ca-export"` |  |
 | eso.pushSecret.refreshInterval | string | `"1m30s"` |  |
