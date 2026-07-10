@@ -40,3 +40,10 @@ Shared export container and volumes for ESO export CronJob and one-shot export J
     name: {{ include "vpProxyCa.fullname" . }}-export-run
     defaultMode: 0555
 {{- end }}
+
+{{/*
+OpenShift restricted-v3 requires hostUsers: false on Pod specs.
+*/}}
+{{- define "vpProxyCa.podHostUsers" -}}
+hostUsers: false
+{{- end }}

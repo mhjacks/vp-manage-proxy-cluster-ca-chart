@@ -360,9 +360,7 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | includeSystemTrustStore | bool | `false` | Include cluster system trust store (trusted-ca-bundle) in export merges. |
 | nameOverride | string | `""` |  |
 | namespace | string | `"vp-manage-proxycluster-ca"` |  |
-| podSecurityContext.runAsGroup | int | `0` |  |
 | podSecurityContext.runAsNonRoot | bool | `true` |  |
-| podSecurityContext.runAsUser | int | `1000690001` |  |
 | podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | resources.limits.cpu | string | `"1"` |  |
 | resources.limits.memory | string | `"1Gi"` |  |

@@ -140,10 +140,9 @@ resources:
     cpu: "1"
     memory: 1Gi
 
+# Omit runAsUser/runAsGroup so OpenShift assigns a UID from each namespace SCC range.
 podSecurityContext:
   runAsNonRoot: true
-  runAsUser: 1000690001
-  runAsGroup: 0
   seccompProfile:
     type: RuntimeDefault
 
