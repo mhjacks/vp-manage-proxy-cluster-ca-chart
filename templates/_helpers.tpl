@@ -33,53 +33,102 @@ Service account name
 {{- end }}
 
 {{/*
-Stable ManifestWork object name (<=63 chars) for each managed cluster namespace.
+Hub vs spoke detection for VP GitOps (global.localClusterDomain vs global.hubClusterDomain).
+Override with hubCluster: true|false when auto-detection is unavailable.
 */}}
-{{- define "vpProxyCa.manifestWorkName" -}}
-{{- $base := .Values.manifestWork.nameOverride | default (printf "%s-proxy-ca" (include "vpProxyCa.fullname" .)) }}
-{{- $base | trunc 63 | trimSuffix "-" }}
+{{- define "vpProxyCa.isHubCluster" -}}
+{{- if eq (.Values.hubCluster | toString) "true" -}}
+true
+{{- else if eq (.Values.hubCluster | toString) "false" -}}
+false
+{{- else if and .Values.global .Values.global.localClusterDomain .Values.global.hubClusterDomain -}}
+{{- eq .Values.global.localClusterDomain .Values.global.hubClusterDomain | toString -}}
+{{- else -}}
+true
+{{- end -}}
 {{- end }}
 
-{{- define "vpProxyCa.manifestWorkProxyName" -}}
-{{- $base := .Values.manifestWork.proxyNameOverride | default (printf "%s-proxy-ca-proxy" (include "vpProxyCa.fullname" .)) }}
-{{- $base | trunc 63 | trimSuffix "-" }}
+{{- define "vpProxyCa.trustSourceConfigMapName" -}}
+{{- .Values.trustManager.sourceConfigMapName | default (printf "%s-sources" (include "vpProxyCa.fullname" .)) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{- define "vpProxyCa.manifestWorkPushAgentName" -}}
-{{- $base := .Values.spokePush.manifestWorkNameOverride | default (printf "%s-push-agent" (include "vpProxyCa.fullname" .)) }}
-{{- $base | trunc 63 | trimSuffix "-" }}
+{{- define "vpProxyCa.trustBundleName" -}}
+{{- .Values.trustManager.bundleName | default .Values.configMapName -}}
 {{- end }}
 
 {{/*
-Namespace for ACM Policy, PlacementBinding, Placement, and ManagedClusterSetBinding.
-When policy.placementRef.namespace is non-empty it overrides policy.hubNamespace so all
-policy placement objects stay in one workspace (PlacementBinding has no cross-namespace placementRef).
+Bundle spec.target.namespaceSelector for trust-bundle.yaml. When trustManager.bundle.namespaceSelector
+is omitted, default to matchLabels.kubernetes.io/metadata.name = targetNamespace. When set, use as-is.
 */}}
-{{- define "vpProxyCa.policyWorkspaceNamespace" -}}
-{{- .Values.policy.placementRef.namespace | default .Values.policy.hubNamespace -}}
+{{- define "vpProxyCa.trustBundleNamespaceSelector" -}}
+{{- $bundleCfg := .Values.trustManager.bundle | default dict -}}
+{{- if hasKey $bundleCfg "namespaceSelector" -}}
+{{- $bundleCfg.namespaceSelector | toYaml -}}
+{{- else -}}
+matchLabels:
+  kubernetes.io/metadata.name: {{ .Values.targetNamespace | quote }}
+{{- end -}}
+{{- end -}}
+
+{{- define "vpProxyCa.trustBundleNamespaceSelectorJson" -}}
+{{- $bundleCfg := .Values.trustManager.bundle | default dict -}}
+{{- if hasKey $bundleCfg "namespaceSelector" -}}
+{{- $bundleCfg.namespaceSelector | toJson -}}
+{{- else -}}
+{{- dict "matchLabels" (dict "kubernetes.io/metadata.name" .Values.targetNamespace) | toJson -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Namespace for ESO export CronJob / PushSecret.
+*/}}
+{{- define "vpProxyCa.esoExportNamespace" -}}
+{{- .Values.eso.export.namespace | default "vp-proxy-ca-sync" -}}
 {{- end }}
 
 {{/*
-ACM Policy validating webhook: len(policyNamespace) + len(policy.metadata.name) <= 62.
-Default: vpca-<truncated Release.Name> to stay under the limit with long hub namespaces.
-Explicit policy.name: must satisfy the same constraint or template fails.
+ServiceAccount for ESO export CronJob.
 */}}
-{{- define "vpProxyCa.policyResourceName" -}}
-{{- $ns := include "vpProxyCa.policyWorkspaceNamespace" . }}
-{{- $max := sub 62 (len $ns) | int }}
-{{- $prefix := "vpca-" }}
-{{- $prefixLen := len $prefix }}
-{{- if lt $max (add $prefixLen 1) }}
-{{- fail (printf "ACM Policy requires len(namespace)+len(name)<=62; namespace %q leaves only %d chars for the policy name" $ns $max) }}
+{{- define "vpProxyCa.esoExportServiceAccountName" -}}
+{{- .Values.eso.export.serviceAccountName | default "vp-proxy-ca-exporter" -}}
 {{- end }}
-{{- $avail := sub $max $prefixLen | int }}
-{{- $defaultName := printf "%s%s" $prefix (.Release.Name | trunc $avail | trimSuffix "-") }}
-{{- if .Values.policy.name }}
-{{- if gt (add (len $ns) (len .Values.policy.name)) 62 }}
-{{- fail (printf "policy.name %q in namespace %q exceeds ACM limit (combined length must be <= 62); shorten policy.name or the policy workspace namespace" .Values.policy.name $ns) }}
+
+{{/*
+Vault property for PushSecret (cluster identity in pushsecrets/cluster-ca).
+*/}}
+{{- define "vpProxyCa.esoVaultProperty" -}}
+{{- if .Values.eso.export.vaultProperty -}}
+{{- .Values.eso.export.vaultProperty -}}
+{{- else if and .Values.global .Values.global.clusterDomain -}}
+{{- .Values.global.clusterDomain -}}
+{{- else -}}
+{{- .Release.Name -}}
+{{- end -}}
 {{- end }}
-{{- .Values.policy.name }}
-{{- else }}
-{{- $defaultName }}
+
+{{/*
+Shared Vault remoteKey for spoke PushSecret / hub ExternalSecret dataFrom.extract.
+*/}}
+{{- define "vpProxyCa.esoVaultRemoteKey" -}}
+{{- .Values.eso.vault.remoteKey | default "pushsecrets/cluster-ca" -}}
 {{- end }}
+
+{{/*
+ESO ClusterSecretStore name (values.eso.secretStore.name or global.secretStore.name or vault-backend).
+*/}}
+{{- define "vpProxyCa.esoSecretStoreName" -}}
+{{- if .Values.eso.secretStore.name -}}
+{{- .Values.eso.secretStore.name -}}
+{{- else if and .Values.global .Values.global.secretStore .Values.global.secretStore.name -}}
+{{- .Values.global.secretStore.name -}}
+{{- else -}}
+vault-backend
+{{- end -}}
+{{- end }}
+
+{{/*
+ESO ClusterSecretStore kind.
+*/}}
+{{- define "vpProxyCa.esoSecretStoreKind" -}}
+{{- .Values.eso.secretStore.kind | default "ClusterSecretStore" -}}
 {{- end }}

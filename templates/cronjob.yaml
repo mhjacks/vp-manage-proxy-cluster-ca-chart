@@ -1,4 +1,4 @@
-{{- if .Values.cronJob.enabled }}
+{{- if and .Values.cronJob.enabled (eq (include "vpProxyCa.isHubCluster" .) "true") }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:

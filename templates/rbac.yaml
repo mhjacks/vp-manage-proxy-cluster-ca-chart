@@ -1,6 +1,4 @@
-{{- $needSecrets := and .Values.acm.enabled (or (eq .Values.distributeToSpokes "kubeconfig") (eq .Values.managedClusterCaSource "spokeTrustedCaBundle")) }}
-{{- $spokePush := and .Values.acm.enabled (eq .Values.managedClusterCaSource "spokePush") }}
-{{- $manifestWork := and .Values.acm.enabled (eq .Values.distributeToSpokes "manifestwork") }}
+{{- $trustManager := .Values.trustManager.enabled }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -9,36 +7,20 @@ metadata:
     app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
 rules:
-{{- if $needSecrets }}
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list"]
-{{- end }}
-{{- if $manifestWork }}
-  - apiGroups: ["work.open-cluster-management.io"]
-    resources: ["manifestworks"]
-    verbs: ["get", "list", "create", "update", "patch", "delete"]
-{{- end }}
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["get", "list", "create", "update", "patch", "delete"]
+{{- if $trustManager }}
+  - apiGroups: ["trust.cert-manager.io"]
+    resources: ["bundles"]
+    verbs: ["get", "list", "create", "update", "patch"]
+{{- end }}
   - apiGroups: ["config.openshift.io"]
     resources: ["proxies"]
     verbs: ["get", "patch"]
   - apiGroups: ["config.openshift.io"]
     resources: ["infrastructures"]
     verbs: ["get"]
-{{- if .Values.acm.enabled }}
-  - apiGroups: ["cluster.open-cluster-management.io"]
-    resources: ["managedclusters"]
-    verbs: ["get", "list"]
-{{- end }}
-{{- if $spokePush }}
-  - apiGroups: [""]
-    resources: ["namespaces"]
-    resourceNames: ["{{ .Values.spokePush.hubNamespace }}"]
-    verbs: ["get"]
-{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

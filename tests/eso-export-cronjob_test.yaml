@@ -1,0 +1,26 @@
+suite: eso export cronjob
+templates:
+  - eso-export-cronjob.yaml
+release:
+  name: testrel
+tests:
+  - it: renders export CronJob with include flags
+    set:
+      eso:
+        export:
+          enabled: true
+      includeIngressCA: true
+      includeSystemTrustStore: true
+    asserts:
+      - isKind:
+          of: CronJob
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: INCLUDE_INGRESS_CA
+            value: "true"
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: INCLUDE_SYSTEM_TRUST_STORE
+            value: "true"

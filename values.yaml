@@ -1,14 +1,10 @@
 ---
-# Hub namespace for the CronJob/Job, RBAC, script ConfigMap, and optional additional-ca Secret.
+# Namespace for the hub CronJob/Job, RBAC, and script ConfigMap.
 namespace: openshift-config
 
-# When false, skip ACM APIs (ManagedCluster, ManifestWork), Governance Policy, and spoke-push agents.
-# The gather job only merges hub API CAs (+ optional ingress + optional system trust + additionalCaBundles)
-# and applies ConfigMap + Proxy/cluster on this cluster (local hub only).
-# Default true: multicluster rollout and policy match an ACM hub.
-acm:
-  # -- When false, hub-only proxy CA (no multicluster); policy.* and spokePush hub assets are not applied.
-  enabled: true
+# Hub vs spoke: auto-detect from global.localClusterDomain == global.hubClusterDomain (VP GitOps).
+# Override with true|false when deploying outside a clustergroup.
+hubCluster: ""
 
 nameOverride: ""
 fullnameOverride: ""
@@ -19,15 +15,48 @@ image:
   pullPolicy: IfNotPresent
 
 # ConfigMap in openshift-config holding ca-bundle.crt for cluster Proxy trustedCA.
-# Use a distinct name if another chart (e.g. opp-policy) already owns cluster-proxy-ca-bundle.
 configMapName: vp-pattern-proxy-ca-bundle
 targetNamespace: openshift-config
+
+# trust-manager Bundle maintains the Proxy ConfigMap by merging trustNamespace sources
+# (Secrets from ESO ExternalSecret + hub-export Secret) into targetNamespace/configMapName.
+trustManager:
+  # -- When true, render trust.cert-manager.io/v1alpha1 Bundle and write merged PEM to the trust source ConfigMap.
+  enabled: true
+  # -- Namespace where trust-manager reads Bundle sources (must match TrustManager.spec.trustManagerConfig.trustNamespace).
+  trustNamespace: cert-manager
+  # -- Bundle metadata.name and target ConfigMap name in targetNamespace (defaults to configMapName).
+  bundleName: ""
+  sourceConfigMapName: ""
+  sourceKey: ca-bundle.crt
+  targetKey: ca-bundle.crt
+  labels:
+    component: cluster-ca.vp.io/component
+    export: export
+    hubExport: hub-export
+    static: static
+    managedCluster: cluster-ca.vp.io/managed-cluster
+    clusterGroup: cluster-ca.vp.io/cluster-group
+  bundle:
+    # -- trust-manager Bundle spec.sources. Spoke PushSecrets label hub Secrets with labels.export;
+    # hub gather job labels hub-export Secret with labels.hubExport.
+    sources:
+      - secret:
+          selector:
+            matchLabels:
+              cluster-ca.vp.io/component: export
+          includeAllKeys: true
+      - secret:
+          selector:
+            matchLabels:
+              cluster-ca.vp.io/component: hub-export
+          key: ca-bundle.crt
 
 serviceAccount:
   create: true
   name: ""
 
-# Run aggregation on a schedule; set suspend true to disable periodic runs.
+# Hub-only: collect local API/ingress/system-trust CAs into hub-export Secret and patch Proxy.
 cronJob:
   enabled: true
   suspend: false
@@ -36,168 +65,55 @@ cronJob:
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
 
-# One-shot Job on helm install/upgrade (runs after templates apply).
+# One-shot Job on helm install/upgrade: patch Proxy (and hub-export on hub).
 syncJob:
   enabled: true
 
-# Optional: oc --selector when listing ManagedCluster objects (empty = all clusters).
-managedClusterLabelSelector: ""
-# Space-separated ManagedCluster names to skip. Default empty: every listed cluster receives the merged
-# bundle and Proxy ManifestWork (hub is still updated directly by the job). Set e.g. local-cluster only if
-# you intentionally skip that MC and rely on hub-only apply for it.
-excludeManagedClusters: ""
+# ESO PushSecret export on each cluster; ExternalSecret imports Vault pushsecrets into trustNamespace.
+# Vault paths and policies: rhvp.cluster_utils (make load-secrets).
+eso:
+  secretStore:
+    # -- ClusterSecretStore name. Empty: use global.secretStore.name from clustergroup, else vault-backend.
+    name: ""
+    kind: ClusterSecretStore
+  vault:
+    # -- PushSecret remoteKey (KV v2 path relative to ClusterSecretStore mount).
+    remoteKey: pushsecrets/cluster-ca
+  export:
+    # -- When true, render export namespace, CronJob, and PushSecret on this cluster.
+    enabled: true
+    namespace: vp-proxy-ca-sync
+    serviceAccountName: vp-proxy-ca-exporter
+    # -- Vault property name (defaults to global.clusterDomain).
+    vaultProperty: ""
+    secretName: cluster-ca-export
+    key: ca-bundle.crt
+    schedule: "*/10 * * * *"
+  pushSecret:
+    name: cluster-ca-export
+    refreshInterval: 1h
+    updatePolicy: Replace
+    deletionPolicy: None
+  hubExport:
+    # -- Hub-only Secret in trustNamespace written by the gather CronJob (labels.hubExport).
+    secretName: cluster-ca-hub
+  externalSecret:
+    # -- ExternalSecret in trustManager.trustNamespace importing all spoke CAs from Vault.
+    enabled: true
+    name: cluster-ca-pushsecrets-import
+    targetSecretName: cluster-ca-pushsecrets-import
+    refreshInterval: 1h
+    vaultKey: secret/data/pushsecrets/cluster-ca
 
-# How to read trust material for each ManagedCluster:
-# - spokePush (default): each spoke runs a CronJob (ManifestWork) that pushes API CAs (+ optional ingress, + optional system trust)
-#   into ConfigMaps in spokePush.hubNamespace on the hub; the gather job reads all bundle-* ConfigMaps.
-# - acm: spec.managedClusterClientConfigs[].caBundle on ManagedCluster (hub API only; plus optional pull of ingress/system trust when kubeconfig exists).
-# - spokeTrustedCaBundle: fetch API CAs (+ optional ingress, + optional system trust) via import kubeconfig.
-managedClusterCaSource: spokePush
-
-# When managedClusterCaSource is spokePush: hub namespace for per-cluster ConfigMaps (bundle-<cluster>).
-spokePush:
-  hubNamespace: vp-proxy-ca-bundles
-  spokeNamespace: vp-proxy-ca-sync
-  schedule: "*/10 * * * *"
-  manifestWorkNameOverride: ""
-  # Max duration for hub tokens embedded in spoke push Secrets (oc create token --duration).
-  tokenDuration: 720h
-  # -- Hub API URL embedded in spoke push Secrets (reachable from every spoke). Empty: kubeconfig cluster.server, else OpenShift `Infrastructure/cluster` status.apiServerURL, else `https://KUBERNETES_SERVICE_HOST:PORT`.
-  hubApiServer: ""
-
-# Primary spoke distribution (default: all ManagedClusters except excludeManagedClusters; hub job lists clusters).
-# - manifestwork: create/update ManifestWork in each managed cluster namespace (no kubeconfig). Independent of ACM Policy.
-# - kubeconfig: use ACM import secret kubeconfigs (same as opp-policy-chart retrieval pattern).
-distributeToSpokes: manifestwork
-
-# ManifestWork metadata.name values (must be <=63 chars, DNS-1123).
-manifestWork:
-  nameOverride: ""
-  proxyNameOverride: ""
-  # Spokes should match the hub: set Proxy/cluster trustedCA to the merged bundle ConfigMap (default true).
-  # Renders in the same ManifestWork as the bundle (strict apply order: optional klusterlet RBAC, ConfigMap, Proxy).
-  # Legacy standalone Proxy ManifestWork name is MANIFEST_WORK_PROXY_NAME for delete-on-upgrade cleanup.
-  patchClusterProxy: true
-  # -- When true (default), prepend ClusterRole + ClusterRoleBinding on each spoke so klusterlet-work-sa can patch Proxy/cluster (ManifestWork SSA on OpenShift Proxy).
-  grantKlusterletProxyPatchRBAC: true
-  # -- Namespace of the spoke klusterlet work ServiceAccount (for ClusterRoleBinding subjects).
-  klusterletWorkServiceAccountNamespace: open-cluster-management-agent
-  # -- Name of the spoke klusterlet work ServiceAccount bound for Proxy patch.
-  klusterletWorkServiceAccountName: klusterlet-work-sa
-
-# Include Kubernetes/OpenShift API server trust (kube-apiserver-server-ca, kube-root-ca fallback,
-# kubeconfig certificate-authority-data fallback for remote pulls, SA CA fallback for local/spoke push).
-# -- Include API CA PEMs from hub/spokes in the merge (default true).
+# -- Include API CA PEMs in hub-export and spoke export (default true).
 includeApiCA: true
-
-# When true (default), merge default ingress router CA (openshift-ingress-operator/router-ca) for hub and spokes
-# where the gather path can reach the spoke API.
-# -- Include default ingress `router-ca` PEMs in the merge when hub/spoke API access allows.
+# -- Include default ingress router-ca PEMs when API access allows.
 includeIngressCA: true
-
-# Include OpenShift platform/system trust bundle (openshift-config-managed/trusted-ca-bundle) for hub and spokes.
-# Default false: keep merged bundle focused on API + ingress CAs unless you explicitly include platform trust.
-# -- Include cluster system trust store (trusted-ca-bundle) from hub/spokes in addition to API and optional ingress CAs.
+# -- Include cluster system trust store (trusted-ca-bundle) in export merges.
 includeSystemTrustStore: false
 
-# Wait until ManagedClusterConditionAvailable=True before touching a spoke.
-waitForManagedClusterAvailable: true
-clusterReadinessMaxAttempts: 150
-clusterReadinessSleepSeconds: 30
-
-# Vault is expected on the hub: hub API CAs (and optional ingress / system trust when enabled) are gathered into
-# the merge, so you normally do not add Vault's CA here. If Vault runs outside the hub (or
-# presents a chain not already in that merged bundle), add the issuing CA PEM(s) below.
-#
-# Each list item is a YAML string. Use a block scalar (|) so PEM line breaks stay intact;
-# you may concatenate multiple certs in one entry or use several list items.
-#
-# Example (commented out): ISRG Root X1 — a public root used by Let's Encrypt (replace with
-# your CA as needed). To use: add an entry under additionalCaBundles with a block scalar (|),
-# then paste the PEM lines (no leading # on those lines). Uncomment the YAML key lines below.
-#
-# additionalCaBundles:
-#   - |
-#     -----BEGIN CERTIFICATE-----
-#     MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
-#     TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
-#     cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4
-#     WhcNMzUwNjA0MTEwNDM4WjBPMQswCQYDVQQGEwJVUzEpMCcGA1UEChMgSW50ZXJu
-#     ZXQgU2VjdXJpdHkgUmVzZWFyY2ggR3JvdXAxFTATBgNVBAMTDElTUkcgUm9vdCBY
-#     MTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAK3oJHP0FDfzm54rVygc
-#     h77ct984kIxuPOZXoHj3dcKi/vVqbvYATyjb3miGbESTtrFj/RQSa78f0uoxmyF+
-#     0TM8ukj13Xnfs7j/EvEhmkvBioZxaUpmZmyPfjxwv60pIgbz5MDmgK7iS4+3mX6U
-#     A5/TR5d8mUgjU+g4rk8Kb4Mu0UlXjIB0ttov0DiNewNwIRt18jA8+o+u3dpjq+sW
-#     T8KOEUt+zwvo/7V3LvSye0rgTBIlDHCNAymg4VMk7BPZ7hm/ELNKjD+Jo2FR3qyH
-#     B5T0Y3HsLuJvW5iB4YlcNHlsdu87kGJ55tukmi8mxdAQ4Q7e2RCOFvu396j3x+UC
-#     B5iPNgiV5+I3lg02dZ77DnKxHZu8A/lJBdiB3QW0KtZB6awBdpUKD9jf1b0SHzUv
-#     KBds0pjBqAlkd25HN7rOrFleaJ1/ctaJxQZBKT5ZPt0m9STJEadao0xAH0ahmbWn
-#     OlFuhjuefXKnEgV4We0+UXgVCwOPjdAvBbI+e0ocS3MFEvzG6uBQE3xDk3SzynTn
-#     jh8BCNAw1FtxNrQHusEwMFxIt4I7mKZ9YIqioymCzLq9gwQbooMDQaHWBfEbwrbw
-#     qHyGO0aoSCqI3Haadr8faqU9GY/rOPNk3sgrDQoo//fb4hVC1CLQJ13hef4Y53CI
-#     rU7m2Ys6xt0nUW7/vGT1M0NPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNV
-#     HRMBAf8EBTADAQH/MB0GA1UdDgQWBBR5tFnme7bl5AFzgAiIyBpY9umbbjANBgkq
-#     hkiG9w0BAQsFAAOCAgEAVR9YqbyyqFDQDLHYGmkgJykIrGF1XIpu+ILlaS/V9lZL
-#     ubhzEFnTIZd+50xx+7LSYK05qAvqFyFWhfFQDlnrzuBZ6brJFe+GnY+EgPbk6ZGQ
-#     3BebYhtF8GaV0nxvwuo77x/Py9auJ/GpsMiu/X1+mvoiBOv/2X/qkSsisRcOj/KK
-#     NFtY2PwByVS5uCbMiogziUwthDyC3+6WVwW6LLv3xLfHTjuCvjHIInNzktHCgKQ5
-#     ORAzI4JMPJ+GslWYHb4phowim57iaztXOoJwTdwJx4nLCgdNbOhdjsnvzqvHu7Ur
-#     TkXWStAmzOVyyghqpZXjFaH3pO3JLF+l+/+sKAIuvtd7u+Nxe5AW0wdeRlN8NwdC
-#     jNPElpzVmbUq4JUagEiuTDkHzsxHpFKVK7q4+63SM1N95R1NbdWhscdCb+ZAJzVc
-#     oyi3B43njTOQ5yOf+1CceWxG1bQVs5ZufpsMljq4Ui0/1lvh+wjChP4kqKOJ2qxq
-#     4RgqsahDYVvTH9w7jXbyLeiNdd8XM2w9U/t7y0Ff/9yi0GE44Za4rF2LN9d11TPA
-#     mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
-#     emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
-#     -----END CERTIFICATE-----
-#
-# PEM blocks are merged into the bundle before de-duplication (each list entry is one or more certs).
-# See README "Injecting extra CA material (additionalCaBundles)" for Git-friendly PEM injection and CNO/Vault notes.
-# -- PEM strings merged into the gather bundle before fingerprint de-duplication; see README Overview "Injecting extra CA material".
+# PEM strings appended as trust-manager Bundle inLine sources when trustManager.enabled.
 additionalCaBundles: []
-
-# ACM Policy + PlacementBinding (default on when acm.enabled): Governance / console visibility for Proxy trustedCA vs configMapName.
-# Templates render only if acm.enabled is true; set acm.enabled false for standalone OpenShift (hub-only gather).
-# Recommended to keep enabled so ACM shows per-cluster compliance alongside ManifestWork rollout (Policy does not gate MW).
-# If Placement selects zero clusters, hub Policy status may stay empty while MW still applies the bundle—fix Placement/bindings.
-# The Job/CronJob owns ConfigMap content; Policy reports whether spokes keep Proxy trustedCA pointed at that ConfigMap name.
-# When policy.createPlacement is true, the chart applies Placement (default cluster set "global").
-# ManagedClusterSetBinding is optional (policy.createManagedClusterSetBindings); default false for GitOps.
-# Set createPlacement false if you manage Placement yourself.
-# Hub Policy status.complianceState stays empty while Placement selects zero clusters (propagator behavior).
-# Default remediation is inform: GRC shows per-cluster compliance and violation detail without the policy
-# controller fighting ManifestWork over the same Proxy object. Use enforce only if ManifestWork does not patch Proxy.
-policy:
-  # -- Enable ACM Policy + PlacementBinding for Governance/GRC console visibility of Proxy trustedCA vs configMapName (does not gate ManifestWork).
-  enabled: true
-  # Base namespace for ACM policy workspace when placementRef.namespace is empty.
-  hubNamespace: open-cluster-management
-  # -- Hub Policy metadata.name; empty uses vpca-<truncated Release.Name> so len(namespace)+len(name)<=62 (ACM webhook).
-  name: ""
-  # -- Shown in ACM Governance as policy description (annotation policy.open-cluster-management.io/description).
-  description: >-
-    Ensures OpenShift Proxy/cluster spec.trustedCA.name matches the merged cluster-wide CA bundle
-    ConfigMap (values.configMapName). Default remediation is inform so GRC shows compliance and cluster
-    violations without competing with this chart's ManifestWork on the same Proxy object.
-  # -- inform (default): report compliance and violations in ACM; ManifestWork applies Proxy. enforce: policy controller also remediates Proxy—avoid with manifestWork.patchClusterProxy true unless you accept two writers.
-  remediationAction: inform
-  # -- NonCompliant message in GRC / cluster violations detail (ConfigurationPolicy spec.customMessage).
-  configurationCustomMessage: >-
-    Proxy/cluster spec.trustedCA.name must match the merged CA bundle ConfigMap (see chart values.configMapName).
-    When NonCompliant, fix ManifestWork rollout or gather output; this policy is inform-only by default so it does not apply Proxy.
-  createPlacement: true
-  # -- When false (default), chart does not render ManagedClusterSetBinding; bind policy.placement.clusterSets in the policy workspace via a platform GitOps app. Set true if this chart should own those bindings.
-  createManagedClusterSetBindings: false
-  placementRef:
-    # Default Placement name created when policy.createPlacement is true; override if you use your own Placement.
-    name: vp-proxy-ca
-    # When non-empty, Policy, PlacementBinding, Placement, and ManagedClusterSetBinding use this namespace
-    # (PlacementBinding cannot reference a Placement in another namespace). Empty uses policy.hubNamespace.
-    namespace: ""
-  placement:
-    # ManagedClusterSets to bind into hubNamespace and to select from (requires clusters to be members of these sets).
-    # Default "global" is the ACM default set that contains all managed clusters on typical installs.
-    clusterSets:
-      - global
 
 resources:
   requests:
@@ -207,8 +123,6 @@ resources:
     cpu: "1"
     memory: 1Gi
 
-# Pod-level security. runAsNonRoot requires a numeric runAsUser when the image USER is non-numeric (e.g. root).
-# runAsUser must fall within your namespace SCC UID range (oc get namespace <ns> -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.uid-range}').
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000690001

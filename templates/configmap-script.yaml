@@ -7,5 +7,5 @@ metadata:
     app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
 data:
-  gather-and-distribute-ca.sh: |
-{{ .Files.Get "files/gather-and-distribute-ca.sh" | indent 4 }}
+  sync-proxy-ca.sh: |
+{{ .Files.Get "files/sync-proxy-ca.sh" | indent 4 }}

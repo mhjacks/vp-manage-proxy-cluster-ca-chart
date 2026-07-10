@@ -1,0 +1,65 @@
+{{- if .Values.eso.export.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "vpProxyCa.fullname" . }}-export
+  namespace: {{ include "vpProxyCa.esoExportNamespace" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: eso-export
+spec:
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  schedule: {{ .Values.eso.export.schedule | quote }}
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
+            app.kubernetes.io/instance: {{ .Release.Name }}
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: {{ include "vpProxyCa.esoExportServiceAccountName" . }}
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: export
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              env:
+                - name: CLUSTER_NAME
+                  value: {{ include "vpProxyCa.esoVaultProperty" . | quote }}
+                - name: EXPORT_NAMESPACE
+                  value: {{ include "vpProxyCa.esoExportNamespace" . | quote }}
+                - name: EXPORT_SECRET_NAME
+                  value: {{ .Values.eso.export.secretName | quote }}
+                - name: EXPORT_SECRET_KEY
+                  value: {{ .Values.eso.export.key | quote }}
+                - name: INCLUDE_INGRESS_CA
+                  value: {{ .Values.includeIngressCA | quote }}
+                - name: INCLUDE_API_CA
+                  value: {{ .Values.includeApiCA | quote }}
+                - name: INCLUDE_SYSTEM_TRUST_STORE
+                  value: {{ .Values.includeSystemTrustStore | quote }}
+              command:
+                - /bin/bash
+                - /scripts/export-cron.sh
+              volumeMounts:
+                - name: exportsh
+                  mountPath: /scripts/export-cron.sh
+                  subPath: export-cron.sh
+                  readOnly: true
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+          volumes:
+            - name: exportsh
+              configMap:
+                name: {{ include "vpProxyCa.fullname" . }}-export-run
+                defaultMode: 0555
+{{- end }}

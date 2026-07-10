@@ -1,0 +1,121 @@
+suite: trust bundle
+templates:
+  - trust-bundle.yaml
+release:
+  name: testrel
+tests:
+  - it: renders trust.cert-manager.io Bundle with secret selector sources by default
+    asserts:
+      - isKind:
+          of: Bundle
+      - equal:
+          path: apiVersion
+          value: trust.cert-manager.io/v1alpha1
+      - equal:
+          path: metadata.name
+          value: vp-pattern-proxy-ca-bundle
+      - equal:
+          path: spec.sources[0].secret.selector.matchLabels["cluster-ca.vp.io/component"]
+          value: export
+      - equal:
+          path: spec.sources[0].secret.includeAllKeys
+          value: true
+      - notExists:
+          path: spec.sources[0].secret.key
+      - equal:
+          path: spec.sources[1].secret.selector.matchLabels["cluster-ca.vp.io/component"]
+          value: hub-export
+      - equal:
+          path: spec.target.configMap.key
+          value: ca-bundle.crt
+      - equal:
+          path: spec.target.namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          value: openshift-config
+  - it: skips Bundle when trustManager is disabled
+    set:
+      trustManager.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: honors custom bundle target key
+    set:
+      configMapName: custom-proxy-ca
+      trustManager:
+        bundleName: custom-bundle
+        sourceKey: merged.pem
+        targetKey: bundle.pem
+    asserts:
+      - equal:
+          path: metadata.name
+          value: custom-bundle
+      - equal:
+          path: spec.target.configMap.key
+          value: bundle.pem
+  - it: honors custom trust bundle namespaceSelector matchLabels
+    set:
+      trustManager:
+        bundle:
+          namespaceSelector:
+            matchLabels:
+              trust.cert-manager.io/inject: "true"
+              app.kubernetes.io/part-of: proxy-ca
+    asserts:
+      - equal:
+          path: spec.target.namespaceSelector.matchLabels["trust.cert-manager.io/inject"]
+          value: "true"
+      - equal:
+          path: spec.target.namespaceSelector.matchLabels["app.kubernetes.io/part-of"]
+          value: proxy-ca
+      - notExists:
+          path: spec.target.namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+  - it: renders custom secret selector with matchExpressions and includeAllKeys
+    set:
+      trustManager:
+        bundle:
+          sources:
+            - secret:
+                selector:
+                  matchLabels:
+                    cluster-ca.vp.io/component: export
+                  matchExpressions:
+                    - key: cluster-ca.vp.io/cluster-group
+                      operator: In
+                      values:
+                        - resilient
+                        - edge
+                includeAllKeys: true
+    asserts:
+      - lengthEqual:
+          path: spec.sources
+          count: 1
+      - equal:
+          path: spec.sources[0].secret.includeAllKeys
+          value: true
+      - equal:
+          path: spec.sources[0].secret.selector.matchExpressions[0].key
+          value: cluster-ca.vp.io/cluster-group
+      - notExists:
+          path: spec.sources[0].secret.key
+  - it: renders named configMap source
+    set:
+      trustManager:
+        bundle:
+          sources:
+            - configMap:
+                name: static-ca
+                key: ca.crt
+    asserts:
+      - equal:
+          path: spec.sources[0].configMap.name
+          value: static-ca
+      - equal:
+          path: spec.sources[0].configMap.key
+          value: ca.crt
+  - it: appends additionalCaBundles as inLine Bundle sources
+    set:
+      additionalCaBundles:
+        - TEST-INLINE-CA-PEM
+    asserts:
+      - matchRegex:
+          path: spec.sources[2].inLine
+          pattern: TEST-INLINE-CA-PEM
