@@ -243,7 +243,33 @@ applications:
 | `additionalCaBundles` | Extra PEMs as **Bundle** **`inLine`** sources. |
 | `cronJob` / `syncJob` | Hub periodic **hub-export** + **Proxy** patch; all clusters one-shot **Proxy** patch. |
 
-## References
+### Troubleshooting: `ClusterSecretStore vault-backend is not ready`
+
+**ExternalSecret** and **PushSecret** stay **Degraded** until the platform **ClusterSecretStore** is **Ready**. This chart does not create **vault-backend**; the **openshift-external-secrets** Application does.
+
+1. Confirm the store exists and inspect its status:
+
+```bash
+oc get clustersecretstore vault-backend
+oc describe clustersecretstore vault-backend
+```
+
+2. Ensure **openshift-external-secrets** is **Synced/Healthy** before this chart (this chart sets **`eso.argoCDSyncWave: 10`** on **ExternalSecret** / **PushSecret** for that reason).
+
+3. **Hub:** **vault** Application must be running; **ClusterSecretStore** uses **`https://vault-vault.<hubClusterDomain>`** with Kubernetes auth **`hub`** mount / **`hub-role`**.
+
+4. **Spokes:** run **`make load-secrets`** ( **`rhvp.cluster_utils.load_secrets`** ) so Vault Kubernetes auth exists for **`global.clusterDomain`** / **`<clusterDomain>-role`**. The store also needs **`external-secrets/hub-ca`** (hub API CA) for TLS to hub Vault.
+
+5. After fixing the store, ESO may take several minutes to requeue. Force reconciliation:
+
+```bash
+oc annotate externalsecret cluster-ca-pushsecrets-import -n cert-manager \
+  force-sync=$(date +%s) --overwrite
+oc annotate pushsecret cluster-ca-export -n vp-proxy-ca-sync \
+  force-sync=$(date +%s) --overwrite
+```
+
+If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO setup, not this chart's **remoteKey** / **vaultKey** paths.
 
 - CA extraction approach: [opp-policy-chart](https://github.com/validatedpatterns/opp-policy-chart).
 - Vault layout: [rhvp.cluster_utils](https://github.com/validatedpatterns/rhvp.cluster_utils).
@@ -275,6 +301,7 @@ applications:
 | cronJob.schedule | string | `"*/10 * * * *"` |  |
 | cronJob.successfulJobsHistoryLimit | int | `1` |  |
 | cronJob.suspend | bool | `false` |  |
+| eso.argoCDSyncWave | int | `10` | Argo CD sync-wave for ExternalSecret/PushSecret (defer until platform ESO creates vault-backend). |
 | eso.export.enabled | bool | `true` | When true, render export namespace, CronJob, and PushSecret on this cluster. |
 | eso.export.key | string | `"ca-bundle.crt"` |  |
 | eso.export.namespace | string | `"vp-proxy-ca-sync"` |  |
@@ -293,7 +320,7 @@ applications:
 | eso.pushSecret.refreshInterval | string | `"1m30s"` |  |
 | eso.pushSecret.updatePolicy | string | `"Replace"` |  |
 | eso.secretStore.kind | string | `"ClusterSecretStore"` |  |
-| eso.secretStore.name | string | `""` | ClusterSecretStore name. Empty: use global.secretStore.name from clustergroup, else vault-backend. |
+| eso.secretStore.name | string | `""` | ClusterSecretStore name. Empty: use secretStore.name (clustergroup), global.secretStore.name, else vault-backend. |
 | eso.vault.remoteKey | string | `"pushsecrets/cluster-ca"` | PushSecret remoteKey (KV v2 path relative to ClusterSecretStore mount). |
 | fullnameOverride | string | `""` |  |
 | hubCluster | string | `""` |  |
@@ -313,6 +340,8 @@ applications:
 | resources.limits.memory | string | `"1Gi"` |  |
 | resources.requests.cpu | string | `"200m"` |  |
 | resources.requests.memory | string | `"512Mi"` |  |
+| secretStore.kind | string | `"ClusterSecretStore"` |  |
+| secretStore.name | string | `""` |  |
 | securityContext.allowPrivilegeEscalation | bool | `false` |  |
 | securityContext.capabilities.drop[0] | string | `"ALL"` |  |
 | serviceAccount.create | bool | `true` |  |

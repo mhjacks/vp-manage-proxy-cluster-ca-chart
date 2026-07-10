@@ -2,8 +2,12 @@
 # Namespace for the hub CronJob/Job, RBAC, and script ConfigMap.
 namespace: vp-manage-proxycluster-ca
 
-# Hub vs spoke: auto-detect from global.localClusterDomain == global.hubClusterDomain (VP GitOps).
-# Override with true|false when deploying outside a clustergroup.
+# Clustergroup passthrough (config-demo pattern); eso.secretStore overrides when set.
+secretStore:
+  name: ""
+  kind: ClusterSecretStore
+
+# Hub vs spoke: auto-detect from global.localClusterDomain == global.hubClusterDomain or clusterGroup.isHubCluster.
 hubCluster: ""
 
 nameOverride: ""
@@ -71,9 +75,12 @@ syncJob:
 
 # ESO PushSecret export on each cluster; ExternalSecret imports Vault pushsecrets into trustNamespace.
 # Vault paths and policies: rhvp.cluster_utils (make load-secrets).
+# Prerequisites: openshift-external-secrets Application Healthy and ClusterSecretStore vault-backend Ready.
 eso:
+  # -- Argo CD sync-wave for ExternalSecret/PushSecret (defer until platform ESO creates vault-backend).
+  argoCDSyncWave: 10
   secretStore:
-    # -- ClusterSecretStore name. Empty: use global.secretStore.name from clustergroup, else vault-backend.
+    # -- ClusterSecretStore name. Empty: use secretStore.name (clustergroup), global.secretStore.name, else vault-backend.
     name: ""
     kind: ClusterSecretStore
   vault:

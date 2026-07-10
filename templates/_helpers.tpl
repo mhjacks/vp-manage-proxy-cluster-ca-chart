@@ -41,6 +41,10 @@ Override with hubCluster: true|false when auto-detection is unavailable.
 true
 {{- else if eq (.Values.hubCluster | toString) "false" -}}
 false
+{{- else if eq ((.Values.clusterGroup | default dict).isHubCluster | toString) "true" -}}
+true
+{{- else if eq ((.Values.clusterGroup | default dict).isHubCluster | toString) "false" -}}
+false
 {{- else if and .Values.global .Values.global.localClusterDomain .Values.global.hubClusterDomain -}}
 {{- eq .Values.global.localClusterDomain .Values.global.hubClusterDomain | toString -}}
 {{- else -}}
@@ -114,11 +118,14 @@ Shared Vault remoteKey for spoke PushSecret / hub ExternalSecret dataFrom.extrac
 {{- end }}
 
 {{/*
-ESO ClusterSecretStore name (values.eso.secretStore.name or global.secretStore.name or vault-backend).
+ESO ClusterSecretStore name (eso.secretStore, root secretStore, global.secretStore.name, or vault-backend).
+Matches config-demo / clustergroup convention: secretStore.name at chart root.
 */}}
 {{- define "vpProxyCa.esoSecretStoreName" -}}
 {{- if .Values.eso.secretStore.name -}}
 {{- .Values.eso.secretStore.name -}}
+{{- else if and .Values.secretStore .Values.secretStore.name -}}
+{{- .Values.secretStore.name -}}
 {{- else if and .Values.global .Values.global.secretStore .Values.global.secretStore.name -}}
 {{- .Values.global.secretStore.name -}}
 {{- else -}}
@@ -130,5 +137,20 @@ vault-backend
 ESO ClusterSecretStore kind.
 */}}
 {{- define "vpProxyCa.esoSecretStoreKind" -}}
-{{- .Values.eso.secretStore.kind | default "ClusterSecretStore" -}}
+{{- if .Values.eso.secretStore.kind -}}
+{{- .Values.eso.secretStore.kind -}}
+{{- else if and .Values.secretStore .Values.secretStore.kind -}}
+{{- .Values.secretStore.kind -}}
+{{- else -}}
+ClusterSecretStore
+{{- end -}}
+{{- end }}
+
+{{/*
+Argo CD sync-wave for ESO resources (defer until openshift-external-secrets creates vault-backend).
+*/}}
+{{- define "vpProxyCa.esoArgoSyncWaveAnnotations" -}}
+{{- if .Values.eso.argoCDSyncWave }}
+argocd.argoproj.io/sync-wave: {{ .Values.eso.argoCDSyncWave | quote }}
+{{- end -}}
 {{- end }}

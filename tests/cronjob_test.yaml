@@ -12,7 +12,7 @@ tests:
           of: CronJob
       - equal:
           path: metadata.namespace
-          value: openshift-config
+          value: vp-manage-proxycluster-ca
       - matchRegex:
           path: spec.jobTemplate.spec.template.spec.containers[0].image
           pattern: "^quay.io/validatedpatterns/imperative-container:"
