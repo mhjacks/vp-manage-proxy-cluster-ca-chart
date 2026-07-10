@@ -7,7 +7,11 @@ metadata:
   labels:
     app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: sync-proxy-ca
   annotations:
+    argocd.argoproj.io/hook: Sync
+{{ include "vpProxyCa.syncJobSyncWaveAnnotations" . | nindent 4 }}
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
@@ -20,12 +24,14 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       restartPolicy: OnFailure
-{{ include "vpProxyCa.podHostUsers" . | nindent 6 }}
+{{- include "vpProxyCa.podHostUsers" . | nindent 6 }}
       serviceAccountName: {{ include "vpProxyCa.serviceAccountName" . }}
+{{- with .Values.syncJob.podSecurityContext }}
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- toYaml . | nindent 8 }}
+{{- end }}
       containers:
-{{ include "vpProxyCa.gatherContainer" . | trim | indent 8 }}
+{{ include "vpProxyCa.syncJobContainer" . | trim | indent 8 }}
       volumes:
 {{ include "vpProxyCa.gatherVolumes" . | trim | indent 8 }}
 {{- end }}

@@ -1,39 +1,33 @@
-suite: eso export job
+suite: sync job
 templates:
-  - eso-export-job.yaml
+  - job-sync.yaml
 release:
   name: testrel
 tests:
-  - it: does not render when export syncJob is disabled
+  - it: does not render when syncJob is disabled
     set:
-      eso:
-        export:
-          enabled: true
-          syncJob:
-            enabled: false
+      syncJob:
+        enabled: false
     asserts:
       - hasDocuments:
           count: 0
-  - it: renders export Job with Argo Sync hook at wave 9
+  - it: renders sync Job as Argo Sync hook at wave 12 with ose-cli
     set:
-      eso:
-        export:
-          enabled: true
-          syncJob:
-            enabled: true
-            argoCDSyncWave: 9
+      syncJob:
+        enabled: true
+        argoCDSyncWave: 12
     asserts:
       - isKind:
           of: Job
       - equal:
           path: metadata.namespace
-          value: vp-proxy-ca-sync
+          value: vp-manage-proxycluster-ca
       - equal:
           path: metadata.annotations["argocd.argoproj.io/hook"]
           value: Sync
       - equal:
           path: metadata.annotations["argocd.argoproj.io/sync-wave"]
-          value: "9"
+          value: "12"
       - equal:
           path: metadata.annotations["argocd.argoproj.io/hook-delete-policy"]
           value: BeforeHookCreation,HookSucceeded
@@ -44,3 +38,14 @@ tests:
           path: spec.template.spec.securityContext
       - notExists:
           path: spec.template.spec.containers[0].securityContext
+  - it: sets WRITE_HUB_EXPORT false on spoke cluster
+    set:
+      hubCluster: false
+      syncJob:
+        enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WRITE_HUB_EXPORT
+            value: "false"

@@ -169,3 +169,26 @@ Argo CD sync-wave for PushSecret (after local export Secret exists).
 {{- $wave := .Values.eso.pushSecret.argoCDSyncWave | default 11 }}
 argocd.argoproj.io/sync-wave: {{ $wave | quote }}
 {{- end }}
+
+{{/*
+Image for gather/sync Job (ose-cli by default; imperative-container optional via syncJob.image).
+*/}}
+{{- define "vpProxyCa.syncJobImageRepository" -}}
+{{- .Values.syncJob.image.repository | default "registry.redhat.io/openshift4/ose-cli" -}}
+{{- end }}
+
+{{- define "vpProxyCa.syncJobImageTag" -}}
+{{- .Values.syncJob.image.tag | default "latest" -}}
+{{- end }}
+
+{{- define "vpProxyCa.syncJobImagePullPolicy" -}}
+{{- .Values.syncJob.image.pullPolicy | default .Values.image.pullPolicy -}}
+{{- end }}
+
+{{/*
+Argo CD sync-wave for hub/spoke Proxy patch Job (after Bundle / ESO resources).
+*/}}
+{{- define "vpProxyCa.syncJobSyncWaveAnnotations" -}}
+{{- $wave := .Values.syncJob.argoCDSyncWave | default 12 }}
+argocd.argoproj.io/sync-wave: {{ $wave | quote }}
+{{- end }}

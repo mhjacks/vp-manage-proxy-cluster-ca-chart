@@ -69,9 +69,18 @@ cronJob:
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
 
-# One-shot Job on helm install/upgrade: patch Proxy (and hub-export on hub).
+# One-shot Job: patch Proxy (and hub-export on hub). Argo Sync hook at wave 12 (after ESO/Bundle).
 syncJob:
   enabled: true
+  argoCDSyncWave: 12
+  # -- ose-cli avoids setgroups errors from root-based imperative-container on restricted SCC.
+  image:
+    repository: registry.redhat.io/openshift4/ose-cli
+    tag: latest
+    pullPolicy: IfNotPresent
+  # -- Optional pod/container securityContext overrides (omit for SCC-assigned UID with ose-cli).
+  # podSecurityContext: {}
+  # containerSecurityContext: {}
 
 # ESO PushSecret export on each cluster; ExternalSecret imports Vault pushsecrets into trustNamespace.
 # Vault paths and policies: rhvp.cluster_utils (make load-secrets).

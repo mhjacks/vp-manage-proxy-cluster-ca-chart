@@ -255,8 +255,35 @@ Sync order (Argo CD waves):
 | 9 | **Export sync Job** (Argo **`hook: Sync`**) — creates **`cluster-ca-export`** |
 | 10 | **ExternalSecret** (needs **`vault-backend`** Ready) |
 | 11 | **PushSecret** (needs local **Secret** + **`vault-backend`**) |
+| 12 | **Proxy patch sync Job** (Argo **`hook: Sync`**) — hub **`hub-export`** + **`Proxy/cluster`** |
 
 If **PushSecret** shows **`could not get source secret`**, the export Job has not succeeded yet (see export Job logs). Export Jobs use **`registry.redhat.io/openshift4/ose-cli`** by default — not **`imperative-container`** (root USER + **`hostUsers: false`** causes **`setgroups: Invalid argument`** on restricted-v3).
+
+### Troubleshooting: Argo CD `one or more synchronization tasks completed unsuccessfully`
+
+This message is generic — expand the failed **Sync** operation in the Argo CD UI (**App details → Sync → Operation**) or use the CLI to see which resource failed:
+
+```bash
+# Replace APP with your Application name (e.g. vp-manage-proxy-cluster-ca on the cluster)
+oc get application APP -n openshift-gitops -o jsonpath='{range .status.operationState.syncResult.resources[*]}{.kind}/{.namespace}/{.name}: {.hookPhase} {.status} {.message}{"\n"}{end}'
+
+oc get jobs -n vp-proxy-ca-sync -l app.kubernetes.io/component=eso-export
+oc get jobs -n vp-manage-proxycluster-ca -l app.kubernetes.io/component=sync-proxy-ca
+oc logs -n vp-proxy-ca-sync job/$(oc get jobs -n vp-proxy-ca-sync -o name 2>/dev/null | grep export | head -1 | cut -d/ -f2) 2>/dev/null
+oc logs -n vp-manage-proxycluster-ca job/$(oc get jobs -n vp-manage-proxycluster-ca -o name 2>/dev/null | grep sync | head -1 | cut -d/ -f2) 2>/dev/null
+```
+
+Common causes after export succeeds:
+
+| Symptom | Likely cause |
+|---------|----------------|
+| **`batch/Job/...-export` hook Failed** | Export hook Job exited non-zero (see Job pod logs). |
+| **`batch/Job/...-sync` hook Failed** | Proxy patch Job failed; previously **`spec.template: field is immutable`** when the Job was left from an earlier sync — fixed by **`hook-delete-policy: BeforeHookCreation,HookSucceeded`**. |
+| **`ExternalSecret` / `PushSecret` apply error** | Missing CRD, wrong **`apiVersion`**, or **`cert-manager`** namespace absent — install **openshift-external-secrets** / **cert-manager-operator** first. |
+| **`Bundle` apply error** | **trust-manager** CRD not installed — set **`trustManager.enabled: false`** until **cert-manager-operator** is Healthy, or order Applications so operator syncs first. |
+| Resources **Synced** but app **Degraded** | **`vault-backend` not Ready** — sync may still retry; see below. |
+
+Sync hook Jobs use **`HookSucceeded`** deletion so Argo CD does not patch immutable Job **`spec.template`** when removing hook finalizers.
 
 ```bash
 oc get secret cluster-ca-export -n vp-proxy-ca-sync
@@ -373,7 +400,9 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | securityContext.capabilities.drop[0] | string | `"ALL"` |  |
 | serviceAccount.create | bool | `true` |  |
 | serviceAccount.name | string | `""` |  |
+| syncJob.argoCDSyncWave | int | `12` |  |
 | syncJob.enabled | bool | `true` |  |
+| syncJob.image | object | `{"pullPolicy":"IfNotPresent","repository":"registry.redhat.io/openshift4/ose-cli","tag":"latest"}` | ose-cli avoids setgroups errors from root-based imperative-container on restricted SCC. |
 | targetNamespace | string | `"openshift-config"` |  |
 | trustManager.bundle.sources | list | `[{"secret":{"includeAllKeys":true,"selector":{"matchLabels":{"cluster-ca.vp.io/component":"export"}}}},{"secret":{"key":"ca-bundle.crt","selector":{"matchLabels":{"cluster-ca.vp.io/component":"hub-export"}}}}]` | trust-manager Bundle spec.sources. Spoke PushSecrets label hub Secrets with labels.export; hub gather job labels hub-export Secret with labels.hubExport. |
 | trustManager.bundleName | string | `""` | Bundle metadata.name and target ConfigMap name in targetNamespace (defaults to configMapName). |
