@@ -34,9 +34,10 @@ tests:
       - equal:
           path: metadata.annotations["argocd.argoproj.io/sync-wave"]
           value: "9"
-      - equal:
-          path: spec.template.spec.containers[0].env[2].name
-          value: EXPORT_SECRET_NAME
-      - equal:
-          path: spec.template.spec.containers[0].env[2].value
-          value: cluster-ca-export
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: "^registry\\.redhat\\.io/openshift4/ose-cli:"
+      - notExists:
+          path: spec.template.spec.securityContext
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext

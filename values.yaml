@@ -89,6 +89,11 @@ eso:
   export:
     # -- When true, render export namespace, CronJob, sync Job, and PushSecret on this cluster.
     enabled: true
+    # -- Image for export Jobs (ose-cli avoids setgroups errors from root-based imperative-container).
+    image:
+      repository: registry.redhat.io/openshift4/ose-cli
+      tag: latest
+      pullPolicy: IfNotPresent
     # -- Argo CD sync-wave for export namespace/RBAC/CronJob (before export sync Job).
     argoCDSyncWave: 8
     namespace: vp-proxy-ca-sync
@@ -140,11 +145,14 @@ resources:
     cpu: "1"
     memory: 1Gi
 
-# Pod-level security. Do not set runAsUser/runAsGroup/runAsNonRoot — OpenShift restricted SCC
-# assigns a UID from the namespace range. Explicit runAsNonRoot causes setgroups errors with some images.
+# Pod-level security for hub gather/sync Jobs only (export Jobs omit this; SCC assigns UID).
+# Do not set runAsUser/runAsGroup/runAsNonRoot. Do not enable podHostUsers with imperative-container (setgroups EINVAL).
 podSecurityContext:
   seccompProfile:
     type: RuntimeDefault
+
+# Set true only when your cluster requires restricted-v3 hostUsers on hub Jobs (not compatible with imperative-container).
+podHostUsers: false
 
 securityContext:
   allowPrivilegeEscalation: false

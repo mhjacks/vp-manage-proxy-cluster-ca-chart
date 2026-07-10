@@ -25,10 +25,8 @@ spec:
             app.kubernetes.io/instance: {{ .Release.Name }}
         spec:
           restartPolicy: OnFailure
-{{ include "vpProxyCa.podHostUsers" . | nindent 10 }}
+{{- include "vpProxyCa.podHostUsers" . | nindent 10 }}
           serviceAccountName: {{ include "vpProxyCa.esoExportServiceAccountName" . }}
-          securityContext:
-            {{- toYaml .Values.podSecurityContext | nindent 12 }}
           containers:
 {{ include "vpProxyCa.esoExportContainer" . | trim | indent 12 }}
           volumes:

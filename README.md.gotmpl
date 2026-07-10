@@ -261,7 +261,7 @@ Sync order (Argo CD waves):
 | 10 | **ExternalSecret** (needs **`vault-backend`** Ready) |
 | 11 | **PushSecret** (needs local **Secret** + **`vault-backend`**) |
 
-If **PushSecret** shows **`could not get source secret`**, the export Job has not succeeded yet:
+If **PushSecret** shows **`could not get source secret`**, the export Job has not succeeded yet (see export Job logs). Export Jobs use **`registry.redhat.io/openshift4/ose-cli`** by default — not **`imperative-container`** (root USER + **`hostUsers: false`** causes **`setgroups: Invalid argument`** on restricted-v3).
 
 ```bash
 oc get secret cluster-ca-export -n vp-proxy-ca-sync

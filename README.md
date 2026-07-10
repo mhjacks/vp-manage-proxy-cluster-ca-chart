@@ -256,7 +256,7 @@ Sync order (Argo CD waves):
 | 10 | **ExternalSecret** (needs **`vault-backend`** Ready) |
 | 11 | **PushSecret** (needs local **Secret** + **`vault-backend`**) |
 
-If **PushSecret** shows **`could not get source secret`**, the export Job has not succeeded yet:
+If **PushSecret** shows **`could not get source secret`**, the export Job has not succeeded yet (see export Job logs). Export Jobs use **`registry.redhat.io/openshift4/ose-cli`** by default — not **`imperative-container`** (root USER + **`hostUsers: false`** causes **`setgroups: Invalid argument`** on restricted-v3).
 
 ```bash
 oc get secret cluster-ca-export -n vp-proxy-ca-sync
@@ -327,6 +327,7 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | eso.argoCDSyncWave | int | `10` | Default Argo CD sync-wave for ExternalSecret when externalSecret.argoCDSyncWave is unset. |
 | eso.export.argoCDSyncWave | int | `8` | Argo CD sync-wave for export namespace/RBAC/CronJob (before export sync Job). |
 | eso.export.enabled | bool | `true` | When true, render export namespace, CronJob, sync Job, and PushSecret on this cluster. |
+| eso.export.image | object | `{"pullPolicy":"IfNotPresent","repository":"registry.redhat.io/openshift4/ose-cli","tag":"latest"}` | Image for export Jobs (ose-cli avoids setgroups errors from root-based imperative-container). |
 | eso.export.key | string | `"ca-bundle.crt"` |  |
 | eso.export.namespace | string | `"vp-proxy-ca-sync"` |  |
 | eso.export.schedule | string | `"*/10 * * * *"` |  |
@@ -360,6 +361,7 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | includeSystemTrustStore | bool | `false` | Include cluster system trust store (trusted-ca-bundle) in export merges. |
 | nameOverride | string | `""` |  |
 | namespace | string | `"vp-manage-proxycluster-ca"` |  |
+| podHostUsers | bool | `false` |  |
 | podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | resources.limits.cpu | string | `"1"` |  |
 | resources.limits.memory | string | `"1Gi"` |  |
