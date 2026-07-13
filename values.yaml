@@ -67,7 +67,7 @@ trustManager:
   # -- Optional second Bundle: same sources/target key shape as the primary Bundle, different namespaceSelector.
   # Target ConfigMap name = labeledBundle.name (default <configMapName>-labeled). Label namespaces in your own GitOps.
   labeledBundle:
-    enabled: false
+    enabled: true
     name: ""
     argoCDSyncWave: 7
     targetKey: ""
