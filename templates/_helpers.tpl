@@ -227,14 +227,21 @@ ConfigMap name for the mounted CA bundle in a trustTest namespace.
 
 {{/*
 Merged global + per-namespace additional ingress checks for trust-test CronJob env JSON.
+Always returns a JSON array (defaults to []).
 */}}
 {{- define "vpProxyCa.trustTestAdditionalIngressJson" -}}
 {{- $root := index . 0 -}}
 {{- $entry := index . 1 -}}
-{{- $global := ($root.Values.trustTest.ingress.additional | default list) -}}
+{{- $ingress := $root.Values.trustTest.ingress | default dict -}}
+{{- $global := $ingress.additional | default list -}}
 {{- $local := list -}}
 {{- if and (not (kindIs "string" $entry)) $entry.additionalIngress -}}
-{{- $local = $entry.additionalIngress -}}
+{{- $local = $entry.additionalIngress | default list -}}
 {{- end -}}
-{{- concat $global $local | toJson -}}
+{{- $merged := concat ($global | default list) ($local | default list) -}}
+{{- if gt (len $merged) 0 -}}
+{{- $merged | toJson -}}
+{{- else -}}
+[]
+{{- end -}}
 {{- end -}}

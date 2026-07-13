@@ -171,7 +171,7 @@ When **`trustTest.enabled`** is **true** and **`trustTest.namespaces`** lists on
 
 1. Mounts the merged CA bundle **`ConfigMap`** (default: opt-in Bundle name **`<configMapName>-opt-in`** when **`trustManager.labeledBundle.enabled`**).
 2. Waits until **`ca-bundle.crt`** is non-empty.
-3. Runs **`curl --cacert`** against discovered or configured **API** (`https://api.<domain>:6443/readyz`) and **ingress** endpoints for the local cluster, hub, and ACM **ManagedClusters** (when present). The default ingress check is the **OpenShift console** URL (`console-openshift-console.apps.<domain>`); on the local cluster the **`console`** **Route** in **`openshift-console`** is used when discoverable.
+3. Runs **`curl --cacert`** against discovered or configured **API** (`https://api.<cluster>.<base>:6443/readyz`, no **`apps.`** segment) and **ingress** endpoints on the cluster **`apps.<cluster>.<base>`** domain for the local cluster, hub, and ACM **ManagedClusters** (when present). The default ingress check is the **OpenShift console** (`console-openshift-console.<apps-domain>`); on the local cluster the **`console`** **Route** in **`openshift-console`** is used when discoverable.
 
 Target namespaces must receive the opt-in Bundle (label with **`cluster-ca.vp.io/trust-bundle-target: "true"`**). Example:
 
@@ -185,7 +185,7 @@ trustTest:
       enabled: true
     additional:
       - name: config-demo
-        hostTemplate: "config-demo-config-demo.apps.%s"
+        hostTemplate: "config-demo-config-demo.%s"
         path: "/index.html"
 ```
 
@@ -524,8 +524,9 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | trustTest.image.repository | string | `"registry.redhat.io/openshift4/ose-cli"` | ose-cli includes oc and curl; avoids setgroups errors from root-based imperative-container. |
 | trustTest.image.tag | string | `"latest"` |  |
 | trustTest.includeLocalCluster | bool | `true` |  |
-| trustTest.ingress.additional | list | `[]` | Extra ingress checks expanded per discovered cluster domain (hostTemplate) or fixed url. - name: config-demo   hostTemplate: "config-demo-config-demo.apps.%s"   path: "/index.html" - name: vault   url: "https://vault.example.com/v1/sys/health" |
-| trustTest.ingress.console | object | `{"enabled":true,"hostTemplate":"console-openshift-console.apps.%s","path":"/","routeName":"console","routeNamespace":"openshift-console"}` | Default ingress TLS check uses the OpenShift console route host pattern per cluster domain. |
+| trustTest.ingress.additional | list | `[]` | Extra ingress checks expanded per cluster apps domain (hostTemplate) or fixed url. - name: config-demo   hostTemplate: "config-demo-config-demo.%s"   path: "/index.html" - name: vault   url: "https://vault.example.com/v1/sys/health" |
+| trustTest.ingress.console | object | `{"enabled":true,"hostTemplate":"console-openshift-console.%s","path":"/","routeName":"console","routeNamespace":"openshift-console"}` | Default ingress TLS check uses the OpenShift console on the cluster apps domain. |
+| trustTest.ingress.console.hostTemplate | string | `"console-openshift-console.%s"` | %s is the ingress domain (apps.<cluster>.<base>) from Ingress.config or derived from the API URL. |
 | trustTest.namespaces | list | `[]` | Namespaces to install the tester (label with cluster-ca.vp.io/trust-bundle-target for labeled Bundle). Each entry may be a string namespace name or an object with name, optional additionalIngress, optional caBundle.configMapName. |
 | trustTest.requireRemoteReachable | bool | `false` | When false, unreachable remote endpoints log a warning instead of failing the job. |
 | trustTest.resources.limits.cpu | string | `"500m"` |  |

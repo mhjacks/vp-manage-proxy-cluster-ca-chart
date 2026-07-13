@@ -103,7 +103,21 @@ tests:
           path: spec.jobTemplate.spec.template.spec.containers[0].env
           content:
             name: CONSOLE_HOST_TEMPLATE
-            value: "console-openshift-console.apps.%s"
+            value: "console-openshift-console.%s"
+
+  - it: defaults ADDITIONAL_INGRESS_JSON to empty array
+    set:
+      trustTest:
+        enabled: true
+        namespaces:
+          - config-demo
+    documentIndex: 4
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: ADDITIONAL_INGRESS_JSON
+            value: "[]"
 
   - it: merges global and per-namespace additional ingress checks
     set:
@@ -112,13 +126,13 @@ tests:
         ingress:
           additional:
             - name: config-demo
-              hostTemplate: "config-demo-config-demo.apps.%s"
+              hostTemplate: "config-demo-config-demo.%s"
               path: "/index.html"
         namespaces:
           - name: hello-world
             additionalIngress:
               - name: hello-world
-                hostTemplate: "hello-world-hello-world.apps.%s"
+                hostTemplate: "hello-world-hello-world.%s"
                 path: "/index.html"
     documentIndex: 4
     asserts:
@@ -126,4 +140,4 @@ tests:
           path: spec.jobTemplate.spec.template.spec.containers[0].env
           content:
             name: ADDITIONAL_INGRESS_JSON
-            value: '[{"hostTemplate":"config-demo-config-demo.apps.%s","name":"config-demo","path":"/index.html"},{"hostTemplate":"hello-world-hello-world.apps.%s","name":"hello-world","path":"/index.html"}]'
+            value: '[{"hostTemplate":"config-demo-config-demo.%s","name":"config-demo","path":"/index.html"},{"hostTemplate":"hello-world-hello-world.%s","name":"hello-world","path":"/index.html"}]'

@@ -197,16 +197,17 @@ trustTest:
     key: ca-bundle.crt
     mountPath: /etc/pki/trust
   ingress:
-    # -- Default ingress TLS check uses the OpenShift console route host pattern per cluster domain.
+    # -- Default ingress TLS check uses the OpenShift console on the cluster apps domain.
     console:
       enabled: true
-      hostTemplate: "console-openshift-console.apps.%s"
+      # -- %s is the ingress domain (apps.<cluster>.<base>) from Ingress.config or derived from the API URL.
+      hostTemplate: "console-openshift-console.%s"
       path: "/"
       routeName: console
       routeNamespace: openshift-console
-    # -- Extra ingress checks expanded per discovered cluster domain (hostTemplate) or fixed url.
+    # -- Extra ingress checks expanded per cluster apps domain (hostTemplate) or fixed url.
     # - name: config-demo
-    #   hostTemplate: "config-demo-config-demo.apps.%s"
+    #   hostTemplate: "config-demo-config-demo.%s"
     #   path: "/index.html"
     # - name: vault
     #   url: "https://vault.example.com/v1/sys/health"

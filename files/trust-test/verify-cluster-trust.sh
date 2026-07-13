@@ -14,11 +14,13 @@ HUB_CLUSTER_DOMAIN="${HUB_CLUSTER_DOMAIN:-}"
 LOCAL_CLUSTER_DOMAIN="${LOCAL_CLUSTER_DOMAIN:-}"
 TRUST_TEST_TARGETS_JSON="${TRUST_TEST_TARGETS_JSON:-[]}"
 CONSOLE_INGRESS_ENABLED="${CONSOLE_INGRESS_ENABLED:-true}"
-CONSOLE_HOST_TEMPLATE="${CONSOLE_HOST_TEMPLATE:-console-openshift-console.apps.%s}"
+# %s is the cluster ingress domain (apps.<cluster>.<base>), not the API hostname.
+CONSOLE_HOST_TEMPLATE="${CONSOLE_HOST_TEMPLATE:-console-openshift-console.%s}"
 CONSOLE_PATH="${CONSOLE_PATH:-/}"
 CONSOLE_ROUTE_NAME="${CONSOLE_ROUTE_NAME:-console}"
 CONSOLE_ROUTE_NAMESPACE="${CONSOLE_ROUTE_NAMESPACE:-openshift-console}"
 ADDITIONAL_INGRESS_JSON="${ADDITIONAL_INGRESS_JSON:-[]}"
+[[ -z "${ADDITIONAL_INGRESS_JSON}" || "${ADDITIONAL_INGRESS_JSON}" == "null" ]] && ADDITIONAL_INGRESS_JSON='[]'
 
 declare -a API_NAMES=()
 declare -a API_URLS=()
@@ -55,16 +57,63 @@ build_https_url() {
   printf 'https://%s%s' "${host}" "$(normalize_path "${path}")"
 }
 
-api_url_for_domain() {
+# API lives at api.<cluster>.<base> — never under the apps. router domain.
+cluster_base_domain() {
   local domain="$1"
-  printf 'https://api.%s:6443/readyz' "${domain}"
+  [[ "${domain}" == apps.* ]] && echo "${domain#apps.}" || echo "${domain}"
 }
 
-console_url_for_domain() {
+# Ingress routes use the cluster ingress domain from Ingress.config (apps.<cluster>.<base>).
+ingress_apps_domain() {
   local domain="$1"
+  [[ "${domain}" == apps.* ]] && echo "${domain}" || echo "apps.${domain}"
+}
+
+api_url_for_domain() {
+  local domain="$1"
+  printf 'https://api.%s:6443/readyz' "$(cluster_base_domain "${domain}")"
+}
+
+api_url_from_server_url() {
+  local api_url="$1"
+  [[ -z "${api_url}" ]] && return 0
+  api_url="${api_url%/}"
+  if [[ "${api_url}" == */readyz ]]; then
+    printf '%s' "${api_url}"
+  else
+    printf '%s/readyz' "${api_url}"
+  fi
+}
+
+ingress_apps_domain_from_api_url() {
+  local api_url="$1"
+  local host=""
+  if [[ "${api_url}" =~ ^https://([^:/]+) ]]; then
+    host="${BASH_REMATCH[1]}"
+  fi
+  [[ -z "${host}" ]] && return 0
+  if [[ "${host}" == api.apps.* ]]; then
+    echo "${host#api.}"
+  elif [[ "${host}" == api.* ]]; then
+    echo "apps.${host#api.}"
+  fi
+}
+
+console_url_for_apps_domain() {
+  local apps_domain="$1"
   local host
-  host="$(printf "${CONSOLE_HOST_TEMPLATE}" "${domain}")"
+  host="$(printf "${CONSOLE_HOST_TEMPLATE}" "${apps_domain}")"
   build_https_url "${host}" "${CONSOLE_PATH}"
+}
+
+discover_local_ingress_domain() {
+  oc get ingresses.config cluster -o jsonpath='{.spec.domain}' 2>/dev/null || true
+}
+
+discover_local_api_url() {
+  local api_url=""
+  api_url="$(oc get infrastructure cluster -o jsonpath='{.status.apiServerURL}' 2>/dev/null || true)"
+  api_url_from_server_url "${api_url}"
 }
 
 discover_local_console_url() {
@@ -103,38 +152,42 @@ add_ingress_check() {
   INGRESS_URLS+=("${url}")
 }
 
-add_console_ingress_for_domain() {
+add_console_ingress_for_apps_domain() {
   local label_prefix="$1"
-  local domain="$2"
+  local apps_domain="$2"
   local prefer_local_discovery="${3:-false}"
   local url=""
 
   [[ "${CONSOLE_INGRESS_ENABLED}" == "true" ]] || return 0
+  [[ -z "${apps_domain}" ]] && return 0
   if [[ "${prefer_local_discovery}" == "true" ]] && url="$(discover_local_console_url)"; then
     add_ingress_check "${label_prefix} console" "${url}"
     return 0
   fi
-  add_ingress_check "${label_prefix} console" "$(console_url_for_domain "${domain}")"
+  add_ingress_check "${label_prefix} console" "$(console_url_for_apps_domain "${apps_domain}")"
 }
 
-expand_additional_ingress_for_domain() {
+expand_additional_ingress_for_apps_domain() {
   local label_prefix="$1"
-  local domain="$2"
+  local apps_domain="$2"
   if ! command -v python3 >/dev/null 2>&1; then
     [[ "${ADDITIONAL_INGRESS_JSON}" != "[]" && -n "${ADDITIONAL_INGRESS_JSON}" ]] && \
       warn "python3 unavailable; skipping ADDITIONAL_INGRESS_JSON for ${label_prefix}"
     return 0
   fi
-  python3 - "${label_prefix}" "${domain}" "${ADDITIONAL_INGRESS_JSON}" <<'PY'
+  python3 - "${label_prefix}" "${apps_domain}" "${ADDITIONAL_INGRESS_JSON}" <<'PY'
 import json, sys
 
-label_prefix, domain, raw = sys.argv[1], sys.argv[2], sys.argv[3] or "[]"
+label_prefix, apps_domain, raw = sys.argv[1], sys.argv[2], sys.argv[3] or "[]"
+raw = raw.strip() or "[]"
 try:
     entries = json.loads(raw)
 except json.JSONDecodeError as exc:
     print(f"invalid ADDITIONAL_INGRESS_JSON: {exc}", file=sys.stderr)
     sys.exit(1)
 
+if entries is None:
+    entries = []
 if not isinstance(entries, list):
     print("ADDITIONAL_INGRESS_JSON must be a JSON array", file=sys.stderr)
     sys.exit(1)
@@ -151,8 +204,8 @@ for item in entries:
     url = item.get("url") or item.get("ingressUrl") or item.get("ingress") or ""
     if not url:
         template = item.get("hostTemplate") or item.get("host") or ""
-        if template and domain:
-            host = template % domain
+        if template and apps_domain:
+            host = template % apps_domain
             path = norm_path(item.get("path") or "/")
             url = f"https://{host}{path}"
     if url:
@@ -167,48 +220,61 @@ PY
 add_cluster_checks() {
   local label_prefix="$1"
   local domain="$2"
-  local prefer_local_console="${3:-false}"
-  [[ -z "${domain}" ]] && return 0
-  add_api_check "${label_prefix}" "$(api_url_for_domain "${domain}")"
-  add_console_ingress_for_domain "${label_prefix}" "${domain}" "${prefer_local_console}"
-  expand_additional_ingress_for_domain "${label_prefix}" "${domain}"
+  local api_url="${3:-}"
+  local prefer_local_console="${4:-false}"
+  local apps_domain=""
+  [[ -z "${domain}" && -z "${api_url}" ]] && return 0
+
+  if [[ -n "${api_url}" ]]; then
+    add_api_check "${label_prefix}" "$(api_url_from_server_url "${api_url}")"
+    apps_domain="$(ingress_apps_domain_from_api_url "${api_url}")"
+  elif [[ -n "${domain}" ]]; then
+    add_api_check "${label_prefix}" "$(api_url_for_domain "${domain}")"
+    apps_domain="$(ingress_apps_domain "${domain}")"
+  fi
+
+  add_console_ingress_for_apps_domain "${label_prefix}" "${apps_domain}" "${prefer_local_console}"
+  expand_additional_ingress_for_apps_domain "${label_prefix}" "${apps_domain}"
 }
 
 discover_local_cluster_domain() {
-  local ingress_domain base_domain api_url
-  ingress_domain="$(oc get ingresses.config cluster -o jsonpath='{.spec.domain}' 2>/dev/null || true)"
+  local ingress_domain api_url
+  ingress_domain="$(discover_local_ingress_domain)"
   if [[ -n "${ingress_domain}" ]]; then
-    if [[ "${ingress_domain}" == apps.* ]]; then
-      base_domain="${ingress_domain#apps.}"
-    else
-      base_domain="${ingress_domain}"
-    fi
-    echo "${base_domain}"
+    echo "${ingress_domain}"
     return 0
   fi
   api_url="$(oc get infrastructure cluster -o jsonpath='{.status.apiServerURL}' 2>/dev/null || true)"
-  if [[ "${api_url}" =~ https://api\.([^:/]+) ]]; then
-    echo "${BASH_REMATCH[1]}"
+  if [[ -n "${api_url}" ]]; then
+    ingress_apps_domain_from_api_url "${api_url}"
   fi
 }
 
 discover_local_targets() {
-  local domain
+  local domain apps_domain api_url
   domain="${LOCAL_CLUSTER_DOMAIN:-}"
   if [[ -z "${domain}" ]]; then
     domain="$(discover_local_cluster_domain || true)"
   fi
-  if [[ -z "${domain}" ]]; then
-    warn "Could not determine local cluster domain"
+  api_url="$(discover_local_api_url || true)"
+  apps_domain="$(ingress_apps_domain "${domain}")"
+  if [[ -z "${domain}" && -z "${api_url}" ]]; then
+    warn "Could not determine local cluster domain or API URL"
     return 0
   fi
-  add_cluster_checks "local:${domain}" "${domain}" "true"
+  if [[ -n "${api_url}" ]]; then
+    add_api_check "local:${domain:-cluster}" "${api_url}"
+  elif [[ -n "${domain}" ]]; then
+    add_api_check "local:${domain}" "$(api_url_for_domain "${domain}")"
+  fi
+  add_console_ingress_for_apps_domain "local:${domain:-cluster}" "${apps_domain}" "true"
+  expand_additional_ingress_for_apps_domain "local:${domain:-cluster}" "${apps_domain}"
 }
 
 discover_hub_target() {
   local domain="${HUB_CLUSTER_DOMAIN:-}"
   [[ -z "${domain}" ]] && return 0
-  add_cluster_checks "hub:${domain}" "${domain}" "false"
+  add_cluster_checks "hub:${domain}" "${domain}" "" "false"
 }
 
 discover_managed_cluster_targets() {
@@ -222,9 +288,11 @@ discover_managed_cluster_targets() {
   while IFS=$'\t' read -r mc_name api_url; do
     [[ -z "${mc_name}" || "${mc_name}" == "local-cluster" ]] && continue
     [[ -z "${api_url}" ]] && continue
-    if [[ "${api_url}" =~ https://api\.([^:/]+) ]]; then
+    if [[ "${api_url}" =~ ^https://api\. ]]; then
+      add_cluster_checks "managed:${mc_name}" "" "${api_url}" "false"
+    elif [[ "${api_url}" =~ https://api\.([^:/]+) ]]; then
       domain="${BASH_REMATCH[1]}"
-      add_cluster_checks "managed:${mc_name}" "${domain}" "false"
+      add_cluster_checks "managed:${mc_name}" "${domain}" "" "false"
     else
       warn "Skipping ${mc_name}: unrecognized API URL ${api_url}"
     fi
@@ -258,6 +326,22 @@ def norm_path(path):
         return "/"
     return path if path.startswith("/") else f"/{path}"
 
+def cluster_base(domain):
+    return domain[5:] if domain.startswith("apps.") else domain
+
+def ingress_apps(domain):
+    return domain if domain.startswith("apps.") else f"apps.{domain}"
+
+def apps_from_api_url(api_url):
+    if not api_url.startswith("https://"):
+        return ""
+    host = api_url[len("https://"):].split("/", 1)[0].split(":", 1)[0]
+    if host.startswith("api.apps."):
+        return host[len("api."):]
+    if host.startswith("api."):
+        return f"apps.{host[len('api.'):]}"
+    return ""
+
 for item in targets:
     if not isinstance(item, dict):
         continue
@@ -265,13 +349,18 @@ for item in targets:
     domain = item.get("clusterDomain") or ""
     api_url = item.get("apiUrl") or item.get("api") or ""
     ingress_url = item.get("ingressUrl") or item.get("ingress") or ""
+    apps_domain = item.get("ingressDomain") or item.get("appsDomain") or ""
+    if domain and not apps_domain:
+        apps_domain = ingress_apps(domain)
+    if api_url and not apps_domain:
+        apps_domain = apps_from_api_url(api_url)
     if domain and not api_url:
-        api_url = f"https://api.{domain}:6443/readyz"
-    if domain and not ingress_url and console_enabled.lower() == "true":
-        host = host_template % domain
+        api_url = f"https://api.{cluster_base(domain)}:6443/readyz"
+    if apps_domain and not ingress_url and console_enabled.lower() == "true":
+        host = host_template % apps_domain
         ingress_url = f"https://{host}{norm_path(console_path)}"
     if api_url:
-        print("\t".join(["API", name, api_url]))
+        print("\t".join(["API", name, api_url if api_url.endswith("/readyz") else api_url.rstrip("/") + "/readyz"]))
     if ingress_url:
         print("\t".join(["INGRESS", f"{name} ingress", ingress_url]))
     extras = item.get("additionalIngress") or item.get("additionalUrls") or []
@@ -283,8 +372,8 @@ for item in targets:
             url = extra.get("url") or extra.get("ingressUrl") or ""
             if not url:
                 template = extra.get("hostTemplate") or extra.get("host") or ""
-                if template and domain:
-                    url = f"https://{template % domain}{norm_path(extra.get('path') or '/')}"
+                if template and apps_domain:
+                    url = f"https://{template % apps_domain}{norm_path(extra.get('path') or '/')}"
             if url:
                 print("\t".join(["INGRESS", f"{name} {label}", url]))
 PY
