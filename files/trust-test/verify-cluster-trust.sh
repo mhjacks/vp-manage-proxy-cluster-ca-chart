@@ -105,7 +105,7 @@ ingress_apps_domain_from_api_url() {
 console_url_for_apps_domain() {
   local apps_domain="$1"
   local host
-  host="$(printf "${CONSOLE_HOST_TEMPLATE}" "${apps_domain}")"
+  host="${CONSOLE_HOST_TEMPLATE//%s/${apps_domain}}"
   build_https_url "${host}" "${CONSOLE_PATH}"
 }
 
@@ -482,7 +482,7 @@ main() {
     curl_tls "${INGRESS_LABELS[i]}" "${INGRESS_URLS[i]}" || failures=$((failures + 1))
   done
 
-  ((${failures} == 0)) || die "${failures} TLS check(s) failed"
+  ((failures == 0)) || die "${failures} TLS check(s) failed"
   log "All TLS checks passed (${#API_NAMES[@]} API, ${#INGRESS_LABELS[@]} ingress)"
 }
 
