@@ -28,7 +28,7 @@ Prerequisites on each cluster:
 | Bundle | Values | ConfigMap in target namespaces |
 |--------|--------|--------------------------------|
 | **Primary** (always) | default | **`configMapName`** in **`targetNamespace`** (**`openshift-config`**) |
-| **Labeled** (optional) | **`trustManager.labeledBundle.enabled: true`** | **`<configMapName>-labeled`** (or **`labeledBundle.name`**) in namespaces matching **`labeledBundle.namespaceSelector`** |
+| **Opt-in** (optional) | **`trustManager.labeledBundle.enabled: true`** | **`<configMapName>-opt-in`** (or **`labeledBundle.name`**) in namespaces matching **`labeledBundle.namespaceSelector`** |
 
 Primary **Bundle** targets **`openshift-config`** only (unless **`trustManager.bundle.namespaceSelector`** overrides). For workload namespaces, enable the second **Bundle** and label namespaces in your own GitOps — this chart does not manage **Namespace** objects.
 
@@ -43,7 +43,7 @@ trustManager:
         cluster-ca.vp.io/trust-bundle-target: "true"
 ```
 
-Label workload namespaces with **`cluster-ca.vp.io/trust-bundle-target: "true"`**. They receive **`ConfigMap/<configMapName>-labeled`** with the same **`ca-bundle.crt`** PEM as **`openshift-config`**.
+Label workload namespaces with **`cluster-ca.vp.io/trust-bundle-target: "true"`**. They receive **`ConfigMap/<configMapName>-opt-in`** with the same **`ca-bundle.crt`** PEM as **`openshift-config`**.
 
 Default **`trustManager.bundle.sources`**:
 
@@ -169,7 +169,7 @@ When **`trustManager.enabled`** is **false**, the hub job merges **`additionalCa
 
 When **`trustTest.enabled`** is **true** and **`trustTest.namespaces`** lists one or more namespaces, the chart renders a **CronJob** in each namespace that:
 
-1. Mounts the merged CA bundle **`ConfigMap`** (default: labeled Bundle name **`<configMapName>-labeled`** when **`trustManager.labeledBundle.enabled`**).
+1. Mounts the merged CA bundle **`ConfigMap`** (default: opt-in Bundle name **`<configMapName>-opt-in`** when **`trustManager.labeledBundle.enabled`**).
 2. Waits until **`ca-bundle.crt`** is non-empty.
 3. Runs **`curl --cacert`** against discovered or configured **API** (`https://api.<domain>:6443/readyz`) and **ingress** (`https://<route>-<ns>.apps.<domain>/...`) endpoints for the local cluster, hub, and ACM **ManagedClusters** (when present).
 
@@ -497,7 +497,7 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | trustManager.bundle.useDefaultCAs | bool | `true` | Prepend useDefaultCAs to Bundle sources (platform CA package). Merged at trust-manager reconcile time. |
 | trustManager.bundleName | string | `""` | Bundle metadata.name and target ConfigMap name in targetNamespace (defaults to configMapName). |
 | trustManager.enabled | bool | `true` | When true, render trust.cert-manager.io/v1alpha1 Bundle and write merged PEM to the trust source ConfigMap. |
-| trustManager.labeledBundle | object | `{"argoCDSyncWave":7,"enabled":true,"name":"","namespaceSelector":{"matchLabels":{"cluster-ca.vp.io/trust-bundle-target":"true"}},"targetKey":""}` | Optional second Bundle: same sources/target key shape as the primary Bundle, different namespaceSelector. Target ConfigMap name = labeledBundle.name (default <configMapName>-labeled). Label namespaces in your own GitOps. |
+| trustManager.labeledBundle | object | `{"argoCDSyncWave":7,"enabled":true,"name":"","namespaceSelector":{"matchLabels":{"cluster-ca.vp.io/trust-bundle-target":"true"}},"targetKey":""}` | Optional second Bundle: same sources/target key shape as the primary Bundle, different namespaceSelector. Target ConfigMap name = labeledBundle.name (default <configMapName>-opt-in). Label namespaces in your own GitOps. |
 | trustManager.labels.clusterGroup | string | `"cluster-ca.vp.io/cluster-group"` |  |
 | trustManager.labels.component | string | `"cluster-ca.vp.io/component"` |  |
 | trustManager.labels.export | string | `"export"` |  |

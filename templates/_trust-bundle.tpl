@@ -21,12 +21,12 @@ matchLabels:
 {{- end -}}
 
 {{/*
-Labeled Bundle metadata.name (ConfigMap name in matched namespaces). Defaults to <primary-bundle-name>-labeled.
+Opt-in Bundle metadata.name (ConfigMap name in matched namespaces). Defaults to <primary-bundle-name>-opt-in.
 */}}
 {{- define "vpProxyCa.labeledTrustBundleName" -}}
 {{- if .Values.trustManager.labeledBundle.name -}}
 {{- .Values.trustManager.labeledBundle.name -}}
 {{- else -}}
-{{- printf "%s-labeled" (include "vpProxyCa.trustBundleName" .) | trunc 63 | trimSuffix "-" -}}
+{{- printf "%s-opt-in" (include "vpProxyCa.trustBundleName" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 {{- end -}}

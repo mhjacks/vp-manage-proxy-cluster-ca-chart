@@ -33,7 +33,7 @@ Prerequisites on each cluster:
 | Bundle | Values | ConfigMap in target namespaces |
 |--------|--------|--------------------------------|
 | **Primary** (always) | default | **`configMapName`** in **`targetNamespace`** (**`openshift-config`**) |
-| **Labeled** (optional) | **`trustManager.labeledBundle.enabled: true`** | **`<configMapName>-labeled`** (or **`labeledBundle.name`**) in namespaces matching **`labeledBundle.namespaceSelector`** |
+| **Opt-in** (optional) | **`trustManager.labeledBundle.enabled: true`** | **`<configMapName>-opt-in`** (or **`labeledBundle.name`**) in namespaces matching **`labeledBundle.namespaceSelector`** |
 
 Primary **Bundle** targets **`openshift-config`** only (unless **`trustManager.bundle.namespaceSelector`** overrides). For workload namespaces, enable the second **Bundle** and label namespaces in your own GitOps — this chart does not manage **Namespace** objects.
 
@@ -48,7 +48,7 @@ trustManager:
         cluster-ca.vp.io/trust-bundle-target: "true"
 ```
 
-Label workload namespaces with **`cluster-ca.vp.io/trust-bundle-target: "true"`**. They receive **`ConfigMap/<configMapName>-labeled`** with the same **`ca-bundle.crt`** PEM as **`openshift-config`**.
+Label workload namespaces with **`cluster-ca.vp.io/trust-bundle-target: "true"`**. They receive **`ConfigMap/<configMapName>-opt-in`** with the same **`ca-bundle.crt`** PEM as **`openshift-config`**.
 
 Default **`trustManager.bundle.sources`**:
 
@@ -174,7 +174,7 @@ When **`trustManager.enabled`** is **false**, the hub job merges **`additionalCa
 
 When **`trustTest.enabled`** is **true** and **`trustTest.namespaces`** lists one or more namespaces, the chart renders a **CronJob** in each namespace that:
 
-1. Mounts the merged CA bundle **`ConfigMap`** (default: labeled Bundle name **`<configMapName>-labeled`** when **`trustManager.labeledBundle.enabled`**).
+1. Mounts the merged CA bundle **`ConfigMap`** (default: opt-in Bundle name **`<configMapName>-opt-in`** when **`trustManager.labeledBundle.enabled`**).
 2. Waits until **`ca-bundle.crt`** is non-empty.
 3. Runs **`curl --cacert`** against discovered or configured **API** (`https://api.<domain>:6443/readyz`) and **ingress** (`https://<route>-<ns>.apps.<domain>/...`) endpoints for the local cluster, hub, and ACM **ManagedClusters** (when present).
 

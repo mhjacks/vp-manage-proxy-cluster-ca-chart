@@ -72,7 +72,7 @@ tests:
     asserts:
       - equal:
           path: spec.jobTemplate.spec.template.spec.volumes[1].configMap.name
-          value: vp-pattern-proxy-ca-bundle-labeled
+          value: vp-pattern-proxy-ca-bundle-opt-in
 
   - it: renders trust-test CronJob with ose-cli image
     set:

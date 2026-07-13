@@ -67,7 +67,7 @@ trustManager:
               cluster-ca.vp.io/component: hub-export
           key: ca-bundle.crt
   # -- Optional second Bundle: same sources/target key shape as the primary Bundle, different namespaceSelector.
-  # Target ConfigMap name = labeledBundle.name (default <configMapName>-labeled). Label namespaces in your own GitOps.
+  # Target ConfigMap name = labeledBundle.name (default <configMapName>-opt-in). Label namespaces in your own GitOps.
   labeledBundle:
     enabled: true
     name: ""
