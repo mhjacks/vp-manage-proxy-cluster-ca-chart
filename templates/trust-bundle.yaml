@@ -4,6 +4,8 @@ apiVersion: trust.cert-manager.io/v1alpha1
 kind: Bundle
 metadata:
   name: {{ $bundleName }}
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ .Values.trustManager.bundle.argoCDSyncWave | quote }}
   labels:
     app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}

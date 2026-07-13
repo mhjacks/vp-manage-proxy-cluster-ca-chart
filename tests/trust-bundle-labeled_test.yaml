@@ -1,0 +1,50 @@
+suite: trust bundle labeled
+templates:
+  - trust-bundle-labeled.yaml
+release:
+  name: testrel
+tests:
+  - it: does not render when labeledBundle is disabled
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: does not render when trustManager is disabled
+    set:
+      trustManager.enabled: false
+      trustManager.labeledBundle.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: renders second Bundle with configurable namespaceSelector
+    set:
+      trustManager.labeledBundle.enabled: true
+      trustManager.labeledBundle.namespaceSelector.matchLabels.cluster-ca\.vp\.io/trust-bundle-target: "true"
+    asserts:
+      - isKind:
+          of: Bundle
+      - equal:
+          path: metadata.name
+          value: vp-pattern-proxy-ca-bundle-labeled
+      - equal:
+          path: spec.target.namespaceSelector.matchLabels["cluster-ca.vp.io/trust-bundle-target"]
+          value: "true"
+      - equal:
+          path: spec.sources[0].secret.includeAllKeys
+          value: true
+      - equal:
+          path: spec.target.configMap.key
+          value: ca-bundle.crt
+      - notExists:
+          path: spec.target.namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+  - it: honors custom labeled bundle name and target key
+    set:
+      trustManager.labeledBundle.enabled: true
+      trustManager.labeledBundle.name: my-workload-ca
+      trustManager.labeledBundle.targetKey: bundle.pem
+    asserts:
+      - equal:
+          path: metadata.name
+          value: my-workload-ca
+      - equal:
+          path: spec.target.configMap.key
+          value: bundle.pem

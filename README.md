@@ -11,10 +11,39 @@ OpenShift chart for cluster-wide Proxy trusted CA bundles. Each cluster exports 
 
 ### trust-manager Bundle (OpenShift cert-manager operator)
 
-When **`trustManager.enabled`** is **true** (default), this chart renders a cluster-scoped **`Bundle`** CR (`trust.cert-manager.io/v1alpha1`). Prerequisites on each cluster:
+When **`trustManager.enabled`** is **true** (default), this chart renders:
 
-1. **cert-manager Operator** with **TrustManager** addon enabled.
+| Resource | Purpose |
+|----------|---------|
+| **`TrustManager`** (`trustManager.operator.enabled`, default **true**) | Installs trust-manager operand (**`metadata.name: cluster`**) |
+| **`Bundle`** | Merges labeled **Secrets** in **`trustManager.trustNamespace`** into target **ConfigMaps** |
+
+Prerequisites on each cluster:
+
+1. **cert-manager Operator** Subscription with **`UNSUPPORTED_ADDON_FEATURES=TrustManager=true`** (pattern **`values-*.yaml`** / clustergroup — not rendered by this chart).
 2. **`trustManager.trustNamespace`** (default **`cert-manager`**) must match **`TrustManager.spec.trustManagerConfig.trustNamespace`**.
+
+**Bundle target namespaces:**
+
+| Bundle | Values | ConfigMap in target namespaces |
+|--------|--------|--------------------------------|
+| **Primary** (always) | default | **`configMapName`** in **`targetNamespace`** (**`openshift-config`**) |
+| **Labeled** (optional) | **`trustManager.labeledBundle.enabled: true`** | **`<configMapName>-labeled`** (or **`labeledBundle.name`**) in namespaces matching **`labeledBundle.namespaceSelector`** |
+
+Primary **Bundle** targets **`openshift-config`** only (unless **`trustManager.bundle.namespaceSelector`** overrides). For workload namespaces, enable the second **Bundle** and label namespaces in your own GitOps — this chart does not manage **Namespace** objects.
+
+Example — Proxy **ConfigMap** plus opt-in app namespaces:
+
+```yaml
+trustManager:
+  labeledBundle:
+    enabled: true
+    namespaceSelector:
+      matchLabels:
+        cluster-ca.vp.io/trust-bundle-target: "true"
+```
+
+Label workload namespaces with **`cluster-ca.vp.io/trust-bundle-target: "true"`**. They receive **`ConfigMap/<configMapName>-labeled`** with the same **`ca-bundle.crt`** PEM as **`openshift-config`**.
 
 Default **`trustManager.bundle.sources`**:
 
@@ -430,15 +459,18 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | syncJob.enabled | bool | `true` |  |
 | syncJob.image | object | `{"pullPolicy":"IfNotPresent","repository":"registry.redhat.io/openshift4/ose-cli","tag":"latest"}` | ose-cli avoids setgroups errors from root-based imperative-container on restricted SCC. |
 | targetNamespace | string | `"openshift-config"` |  |
+| trustManager.bundle.argoCDSyncWave | int | `7` |  |
 | trustManager.bundle.sources | list | `[{"secret":{"includeAllKeys":true,"selector":{"matchLabels":{"cluster-ca.vp.io/component":"export"}}}},{"secret":{"key":"ca-bundle.crt","selector":{"matchLabels":{"cluster-ca.vp.io/component":"hub-export"}}}}]` | trust-manager Bundle spec.sources. Spoke PushSecrets label hub Secrets with labels.export; hub gather job labels hub-export Secret with labels.hubExport. |
 | trustManager.bundleName | string | `""` | Bundle metadata.name and target ConfigMap name in targetNamespace (defaults to configMapName). |
 | trustManager.enabled | bool | `true` | When true, render trust.cert-manager.io/v1alpha1 Bundle and write merged PEM to the trust source ConfigMap. |
+| trustManager.labeledBundle | object | `{"argoCDSyncWave":7,"enabled":false,"name":"","namespaceSelector":{"matchLabels":{"cluster-ca.vp.io/trust-bundle-target":"true"}},"targetKey":""}` | Optional second Bundle: same sources/target key shape as the primary Bundle, different namespaceSelector. Target ConfigMap name = labeledBundle.name (default <configMapName>-labeled). Label namespaces in your own GitOps. |
 | trustManager.labels.clusterGroup | string | `"cluster-ca.vp.io/cluster-group"` |  |
 | trustManager.labels.component | string | `"cluster-ca.vp.io/component"` |  |
 | trustManager.labels.export | string | `"export"` |  |
 | trustManager.labels.hubExport | string | `"hub-export"` |  |
 | trustManager.labels.managedCluster | string | `"cluster-ca.vp.io/managed-cluster"` |  |
 | trustManager.labels.static | string | `"static"` |  |
+| trustManager.operator | object | `{"argoCDSyncWave":6,"defaultCAPackage":{"policy":"Enabled"},"enabled":true,"filterExpiredCertificates":"Enabled","name":"cluster"}` | OpenShift TrustManager CR (requires cert-manager Subscription with UNSUPPORTED_ADDON_FEATURES=TrustManager=true). |
 | trustManager.sourceConfigMapName | string | `""` |  |
 | trustManager.sourceKey | string | `"ca-bundle.crt"` |  |
 | trustManager.targetKey | string | `"ca-bundle.crt"` |  |

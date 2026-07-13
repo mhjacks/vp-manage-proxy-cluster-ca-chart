@@ -16,10 +16,39 @@
 
 ### trust-manager Bundle (OpenShift cert-manager operator)
 
-When **`trustManager.enabled`** is **true** (default), this chart renders a cluster-scoped **`Bundle`** CR (`trust.cert-manager.io/v1alpha1`). Prerequisites on each cluster:
+When **`trustManager.enabled`** is **true** (default), this chart renders:
 
-1. **cert-manager Operator** with **TrustManager** addon enabled.
+| Resource | Purpose |
+|----------|---------|
+| **`TrustManager`** (`trustManager.operator.enabled`, default **true**) | Installs trust-manager operand (**`metadata.name: cluster`**) |
+| **`Bundle`** | Merges labeled **Secrets** in **`trustManager.trustNamespace`** into target **ConfigMaps** |
+
+Prerequisites on each cluster:
+
+1. **cert-manager Operator** Subscription with **`UNSUPPORTED_ADDON_FEATURES=TrustManager=true`** (pattern **`values-*.yaml`** / clustergroup — not rendered by this chart).
 2. **`trustManager.trustNamespace`** (default **`cert-manager`**) must match **`TrustManager.spec.trustManagerConfig.trustNamespace`**.
+
+**Bundle target namespaces:**
+
+| Bundle | Values | ConfigMap in target namespaces |
+|--------|--------|--------------------------------|
+| **Primary** (always) | default | **`configMapName`** in **`targetNamespace`** (**`openshift-config`**) |
+| **Labeled** (optional) | **`trustManager.labeledBundle.enabled: true`** | **`<configMapName>-labeled`** (or **`labeledBundle.name`**) in namespaces matching **`labeledBundle.namespaceSelector`** |
+
+Primary **Bundle** targets **`openshift-config`** only (unless **`trustManager.bundle.namespaceSelector`** overrides). For workload namespaces, enable the second **Bundle** and label namespaces in your own GitOps — this chart does not manage **Namespace** objects.
+
+Example — Proxy **ConfigMap** plus opt-in app namespaces:
+
+```yaml
+trustManager:
+  labeledBundle:
+    enabled: true
+    namespaceSelector:
+      matchLabels:
+        cluster-ca.vp.io/trust-bundle-target: "true"
+```
+
+Label workload namespaces with **`cluster-ca.vp.io/trust-bundle-target: "true"`**. They receive **`ConfigMap/<configMapName>-labeled`** with the same **`ca-bundle.crt`** PEM as **`openshift-config`**.
 
 Default **`trustManager.bundle.sources`**:
 

@@ -27,6 +27,14 @@ targetNamespace: openshift-config
 trustManager:
   # -- When true, render trust.cert-manager.io/v1alpha1 Bundle and write merged PEM to the trust source ConfigMap.
   enabled: true
+  # -- OpenShift TrustManager CR (requires cert-manager Subscription with UNSUPPORTED_ADDON_FEATURES=TrustManager=true).
+  operator:
+    enabled: true
+    name: cluster
+    argoCDSyncWave: 6
+    filterExpiredCertificates: Enabled
+    defaultCAPackage:
+      policy: Enabled
   # -- Namespace where trust-manager reads Bundle sources (must match TrustManager.spec.trustManagerConfig.trustNamespace).
   trustNamespace: cert-manager
   # -- Bundle metadata.name and target ConfigMap name in targetNamespace (defaults to configMapName).
@@ -42,6 +50,7 @@ trustManager:
     managedCluster: cluster-ca.vp.io/managed-cluster
     clusterGroup: cluster-ca.vp.io/cluster-group
   bundle:
+    argoCDSyncWave: 7
     # -- trust-manager Bundle spec.sources. Spoke PushSecrets label hub Secrets with labels.export;
     # hub gather job labels hub-export Secret with labels.hubExport.
     sources:
@@ -55,6 +64,16 @@ trustManager:
             matchLabels:
               cluster-ca.vp.io/component: hub-export
           key: ca-bundle.crt
+  # -- Optional second Bundle: same sources/target key shape as the primary Bundle, different namespaceSelector.
+  # Target ConfigMap name = labeledBundle.name (default <configMapName>-labeled). Label namespaces in your own GitOps.
+  labeledBundle:
+    enabled: false
+    name: ""
+    argoCDSyncWave: 7
+    targetKey: ""
+    namespaceSelector:
+      matchLabels:
+        cluster-ca.vp.io/trust-bundle-target: "true"
 
 serviceAccount:
   create: true

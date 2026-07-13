@@ -51,7 +51,7 @@ tests:
       - equal:
           path: spec.target.configMap.key
           value: bundle.pem
-  - it: honors custom trust bundle namespaceSelector matchLabels
+  - it: honors custom trust bundle namespaceSelector matchLabels on primary Bundle
     set:
       trustManager:
         bundle:

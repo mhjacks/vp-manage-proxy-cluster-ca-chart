@@ -1,0 +1,31 @@
+suite: trust manager
+templates:
+  - trust-manager.yaml
+release:
+  name: testrel
+tests:
+  - it: does not render when trustManager is disabled
+    set:
+      trustManager.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: does not render when operator is disabled
+    set:
+      trustManager.operator.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: renders TrustManager CR with defaults
+    asserts:
+      - isKind:
+          of: TrustManager
+      - equal:
+          path: metadata.name
+          value: cluster
+      - equal:
+          path: spec.trustManagerConfig.trustNamespace
+          value: cert-manager
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "6"

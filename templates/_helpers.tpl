@@ -61,29 +61,6 @@ true
 {{- end }}
 
 {{/*
-Bundle spec.target.namespaceSelector for trust-bundle.yaml. When trustManager.bundle.namespaceSelector
-is omitted, default to matchLabels.kubernetes.io/metadata.name = targetNamespace. When set, use as-is.
-*/}}
-{{- define "vpProxyCa.trustBundleNamespaceSelector" -}}
-{{- $bundleCfg := .Values.trustManager.bundle | default dict -}}
-{{- if hasKey $bundleCfg "namespaceSelector" -}}
-{{- $bundleCfg.namespaceSelector | toYaml -}}
-{{- else -}}
-matchLabels:
-  kubernetes.io/metadata.name: {{ .Values.targetNamespace | quote }}
-{{- end -}}
-{{- end -}}
-
-{{- define "vpProxyCa.trustBundleNamespaceSelectorJson" -}}
-{{- $bundleCfg := .Values.trustManager.bundle | default dict -}}
-{{- if hasKey $bundleCfg "namespaceSelector" -}}
-{{- $bundleCfg.namespaceSelector | toJson -}}
-{{- else -}}
-{{- dict "matchLabels" (dict "kubernetes.io/metadata.name" .Values.targetNamespace) | toJson -}}
-{{- end -}}
-{{- end -}}
-
-{{/*
 Namespace for ESO export CronJob / PushSecret.
 */}}
 {{- define "vpProxyCa.esoExportNamespace" -}}

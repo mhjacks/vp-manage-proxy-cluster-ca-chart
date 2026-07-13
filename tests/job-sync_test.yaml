@@ -21,7 +21,7 @@ tests:
           of: Job
       - equal:
           path: metadata.namespace
-          value: vp-manage-proxycluster-ca
+          value: vp-manage-proxy-cluster-ca
       - equal:
           path: metadata.annotations["argocd.argoproj.io/hook"]
           value: Sync
