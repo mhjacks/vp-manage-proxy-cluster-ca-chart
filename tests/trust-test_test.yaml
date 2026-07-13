@@ -1,0 +1,97 @@
+suite: trust test
+templates:
+  - trust-test.yaml
+release:
+  name: testrel
+tests:
+  - it: does not render when trustTest.enabled is false
+    set:
+      trustTest:
+        enabled: false
+        namespaces:
+          - config-demo
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: does not render when namespaces list is empty
+    set:
+      trustTest:
+        enabled: true
+        namespaces: []
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders ClusterRole ClusterRoleBinding and per-namespace CronJob
+    set:
+      trustTest:
+        enabled: true
+        namespaces:
+          - config-demo
+          - hello-world
+      trustManager:
+        labeledBundle:
+          enabled: true
+      configMapName: vp-pattern-proxy-ca-bundle
+    asserts:
+      - hasDocuments:
+          count: 8
+      - isKind:
+          of: ClusterRole
+        documentIndex: 0
+      - isKind:
+          of: ClusterRoleBinding
+        documentIndex: 1
+      - equal:
+          path: metadata.namespace
+          value: config-demo
+        documentIndex: 2
+      - isKind:
+          of: CronJob
+        documentIndex: 4
+      - equal:
+          path: metadata.namespace
+          value: hello-world
+        documentIndex: 5
+      - isKind:
+          of: CronJob
+        documentIndex: 7
+
+  - it: mounts labeled bundle ConfigMap by default
+    set:
+      trustTest:
+        enabled: true
+        namespaces:
+          - config-demo
+      configMapName: vp-pattern-proxy-ca-bundle
+      trustManager:
+        labeledBundle:
+          enabled: true
+    documentIndex: 4
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.volumes[1].configMap.name
+          value: vp-pattern-proxy-ca-bundle-labeled
+
+  - it: honors per-namespace route overrides
+    set:
+      trustTest:
+        enabled: true
+        namespaces:
+          - name: hello-world
+            route:
+              name: hello-world
+              namespace: hello-world
+    documentIndex: 4
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: ROUTE_NAME
+            value: hello-world
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: ROUTE_NAMESPACE
+            value: hello-world

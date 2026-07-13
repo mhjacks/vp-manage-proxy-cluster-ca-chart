@@ -167,6 +167,48 @@ includeIngressCA: true
 # PEM strings appended as trust-manager Bundle inLine sources when trustManager.enabled.
 additionalCaBundles: []
 
+# Optional CronJob(s) that curl hub + managed-cluster API/ingress endpoints using the
+# labeled trust bundle ConfigMap injected into each listed namespace.
+trustTest:
+  # -- When true, render trust-test CronJobs in trustTest.namespaces (requires non-empty list).
+  enabled: false
+  # -- Namespaces to install the tester (label with cluster-ca.vp.io/trust-bundle-target for labeled Bundle).
+  # Each entry may be a string namespace name or an object with name, optional route, optional caBundle.configMapName.
+  namespaces: []
+  schedule: "0 */6 * * *"
+  suspend: false
+  argoCDSyncWave: 13
+  activeDeadlineSeconds: 900
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  caWaitSeconds: 300
+  discoverManagedClusters: true
+  includeLocalCluster: true
+  # -- When false, unreachable remote endpoints log a warning instead of failing the job.
+  requireRemoteReachable: false
+  image:
+    repository: registry.access.redhat.com/ubi9/ubi
+    tag: "9.6"
+    pullPolicy: IfNotPresent
+  caBundle:
+    # -- Empty: labeled Bundle ConfigMap name when labeledBundle.enabled, else configMapName.
+    configMapName: ""
+    key: ca-bundle.crt
+    mountPath: /etc/pki/trust
+  route:
+    # -- Default ingress route for apps.<clusterDomain> pattern when not set per namespace.
+    name: config-demo
+    namespace: config-demo
+  # -- Optional explicit targets merged with ACM/local discovery.
+  targets: []
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
 resources:
   requests:
     cpu: 200m

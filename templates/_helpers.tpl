@@ -181,3 +181,58 @@ Argo CD sync-wave for hub/spoke Proxy patch Job (after Bundle / ESO resources).
 {{- $wave := .Values.syncJob.argoCDSyncWave | default 12 }}
 argocd.argoproj.io/sync-wave: {{ $wave | quote }}
 {{- end }}
+
+{{/*
+trustTest.namespaces entry: string name or { name, route?, caBundle? }.
+*/}}
+{{- define "vpProxyCa.trustTestNamespaceName" -}}
+{{- if kindIs "string" . -}}
+{{- . -}}
+{{- else -}}
+{{- .name -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+ConfigMap name for the mounted CA bundle in a trustTest namespace.
+*/}}
+{{- define "vpProxyCa.trustTestCaBundleConfigMapName" -}}
+{{- $root := index . 0 -}}
+{{- $entry := index . 1 -}}
+{{- if and (not (kindIs "string" $entry)) $entry.caBundle $entry.caBundle.configMapName -}}
+{{- $entry.caBundle.configMapName -}}
+{{- else if $root.Values.trustTest.caBundle.configMapName -}}
+{{- $root.Values.trustTest.caBundle.configMapName -}}
+{{- else if and $root.Values.trustManager.enabled $root.Values.trustManager.labeledBundle.enabled -}}
+{{- include "vpProxyCa.labeledTrustBundleName" $root -}}
+{{- else -}}
+{{- $root.Values.configMapName -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Route name/namespace for ingress TLS checks in a trustTest namespace.
+*/}}
+{{- define "vpProxyCa.trustTestRouteName" -}}
+{{- $root := index . 0 -}}
+{{- $entry := index . 1 -}}
+{{- if and (not (kindIs "string" $entry)) $entry.route $entry.route.name -}}
+{{- $entry.route.name -}}
+{{- else if $root.Values.trustTest.route.name -}}
+{{- $root.Values.trustTest.route.name -}}
+{{- else -}}
+config-demo
+{{- end -}}
+{{- end }}
+
+{{- define "vpProxyCa.trustTestRouteNamespace" -}}
+{{- $root := index . 0 -}}
+{{- $entry := index . 1 -}}
+{{- if and (not (kindIs "string" $entry)) $entry.route $entry.route.namespace -}}
+{{- $entry.route.namespace -}}
+{{- else if $root.Values.trustTest.route.namespace -}}
+{{- $root.Values.trustTest.route.namespace -}}
+{{- else -}}
+{{- include "vpProxyCa.trustTestNamespaceName" $entry -}}
+{{- end -}}
+{{- end }}

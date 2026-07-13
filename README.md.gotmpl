@@ -170,6 +170,32 @@ With **`trustManager.enabled`** (default), the merged **Proxy** **ConfigMap** is
 
 When **`trustManager.enabled`** is **false**, the hub job merges **`additionalCaBundles`** with hub CAs before writing **`configMapName`** (no **Bundle**).
 
+### Optional TLS trust verification (`trustTest`)
+
+When **`trustTest.enabled`** is **true** and **`trustTest.namespaces`** lists one or more namespaces, the chart renders a **CronJob** in each namespace that:
+
+1. Mounts the merged CA bundle **`ConfigMap`** (default: labeled Bundle name **`<configMapName>-labeled`** when **`trustManager.labeledBundle.enabled`**).
+2. Waits until **`ca-bundle.crt`** is non-empty.
+3. Runs **`curl --cacert`** against discovered or configured **API** (`https://api.<domain>:6443/readyz`) and **ingress** (`https://<route>-<ns>.apps.<domain>/...`) endpoints for the local cluster, hub, and ACM **ManagedClusters** (when present).
+
+Target namespaces must receive the labeled Bundle (label with **`cluster-ca.vp.io/trust-bundle-target: "true"`**). Example:
+
+```yaml
+trustTest:
+  enabled: true
+  namespaces:
+    - config-demo
+    - name: hello-world
+      route:
+        name: hello-world
+        namespace: hello-world
+  route:
+    name: config-demo
+    namespace: config-demo
+```
+
+Set **`trustTest.requireRemoteReachable: true`** to fail when remote clusters are unreachable (default: unreachable endpoints log a warning; TLS verification failures always fail the job).
+
 ### Example: init container TLS precheck for workload HTTPS
 
 If your application calls an HTTPS endpoint (for example **HashiCorp Vault**) and must use the **same CA material** as the cluster-wide proxy bundle, mount **`ca-bundle.crt`** into the pod and optionally run an **init container** before the main containers start. Typical sources for that file are:
