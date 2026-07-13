@@ -23,8 +23,6 @@ Hub CronJob container (imperative-container + container securityContext).
       value: {{ .Values.includeIngressCA | quote }}
     - name: INCLUDE_API_CA
       value: {{ .Values.includeApiCA | quote }}
-    - name: INCLUDE_SYSTEM_TRUST_STORE
-      value: {{ .Values.includeSystemTrustStore | quote }}
     - name: TRUST_MANAGER_ENABLED
       value: {{ .Values.trustManager.enabled | toString | quote }}
     - name: TRUST_NAMESPACE
@@ -86,8 +84,6 @@ One-shot sync Job container (ose-cli by default; omit securityContext unless syn
       value: {{ .Values.includeIngressCA | quote }}
     - name: INCLUDE_API_CA
       value: {{ .Values.includeApiCA | quote }}
-    - name: INCLUDE_SYSTEM_TRUST_STORE
-      value: {{ .Values.includeSystemTrustStore | quote }}
     - name: TRUST_MANAGER_ENABLED
       value: {{ .Values.trustManager.enabled | toString | quote }}
     - name: TRUST_NAMESPACE

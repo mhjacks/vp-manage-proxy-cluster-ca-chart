@@ -34,11 +34,6 @@ tests:
       - contains:
           path: spec.jobTemplate.spec.template.spec.containers[0].env
           content:
-            name: INCLUDE_SYSTEM_TRUST_STORE
-            value: "false"
-      - contains:
-          path: spec.jobTemplate.spec.template.spec.containers[0].env
-          content:
             name: TRUST_MANAGER_ENABLED
             value: "true"
       - contains:

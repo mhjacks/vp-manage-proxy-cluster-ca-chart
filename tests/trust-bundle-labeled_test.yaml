@@ -5,6 +5,8 @@ release:
   name: testrel
 tests:
   - it: does not render when labeledBundle is disabled
+    set:
+      trustManager.labeledBundle.enabled: false
     asserts:
       - hasDocuments:
           count: 0
@@ -29,7 +31,10 @@ tests:
           path: spec.target.namespaceSelector.matchLabels["cluster-ca.vp.io/trust-bundle-target"]
           value: "true"
       - equal:
-          path: spec.sources[0].secret.includeAllKeys
+          path: spec.sources[0].useDefaultCAs
+          value: true
+      - equal:
+          path: spec.sources[1].secret.includeAllKeys
           value: true
       - equal:
           path: spec.target.configMap.key

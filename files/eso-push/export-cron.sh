@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs on the spoke: merge API server CA, optional ingress CA, optional system trust; update local export Secret.
+# Runs on the spoke: merge API server CA, optional ingress CA; update local export Secret.
 set -euo pipefail
 : >/tmp/trust.crt
 if [[ "${INCLUDE_API_CA:-true}" == "true" ]]; then
@@ -11,11 +11,6 @@ if [[ "${INCLUDE_API_CA:-true}" == "true" ]]; then
     cat /var/run/secrets/kubernetes.io/serviceaccount/ca.crt >>/tmp/trust.crt
     printf '\n' >>/tmp/trust.crt
   fi
-fi
-if [[ "${INCLUDE_SYSTEM_TRUST_STORE:-false}" == "true" ]]; then
-  oc get configmap trusted-ca-bundle -n openshift-config-managed \
-    -o jsonpath='{.data.ca-bundle\.crt}' >>/tmp/trust.crt || true
-  printf '\n' >>/tmp/trust.crt
 fi
 if [[ "${INCLUDE_INGRESS_CA}" == "true" ]]; then
   oc get secret router-ca -n openshift-ingress-operator -o jsonpath='{.data.tls\.crt}' 2>/dev/null | base64 -d >>/tmp/trust.crt || true

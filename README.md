@@ -68,7 +68,7 @@ Each cluster (hub and spokes) renders:
 
 | Resource | Purpose |
 |----------|---------|
-| Export **CronJob** | Normalizes API/ingress/system-trust CAs into a local **Secret** |
+| Export **CronJob** | Normalizes API/ingress CAs into a local **Secret** |
 | **PushSecret** | Pushes **`ca-bundle.crt`** to Vault **`pushsecrets/cluster-ca#<cluster>`** |
 | **ExternalSecret** | Imports all cluster properties from Vault into **`trustManager.trustNamespace`** |
 | **Bundle** | Merges **`export`** + **`hub-export`** labeled **Secrets** into **`configMapName`** |
@@ -153,9 +153,17 @@ spec:
 
 ### Injecting extra CA material (`additionalCaBundles`)
 
-When **`trustManager.enabled`** is **true**, each **`additionalCaBundles`** entry is a **Bundle** **`inLine`** source. The hub job does not re-merge those PEMs into **`hub-export`**.
+With **`trustManager.enabled`** (default), the merged **Proxy** **ConfigMap** is:
 
-When **`trustManager.enabled`** is **false**, the hub job merges **`additionalCaBundles`** with hub CAs before writing **`configMapName`**.
+**`useDefaultCAs`** (platform trust store) + cluster export/hub-export **Secrets** + **`additionalCaBundles`** (**`inLine`**).
+
+| Source | Where merged | Purpose |
+|--------|--------------|---------|
+| **`trustManager.bundle.useDefaultCAs: true`** (default) | trust-manager **Bundle** | System/public CAs at Bundle merge time |
+| Export / hub-export **Secrets** | **Bundle** | Per-cluster API/ingress CAs |
+| **`additionalCaBundles`** | **Bundle** **`inLine`** | Your extra PEMs, additive to the above |
+
+When **`trustManager.enabled`** is **false**, the hub job merges **`additionalCaBundles`** with hub CAs before writing **`configMapName`** (no **Bundle**).
 
 ### Example: init container TLS precheck for workload HTTPS
 
@@ -268,7 +276,7 @@ applications:
 | `eso.export.*` | Export namespace, **CronJob** schedule, **PushSecret** local **Secret**, Vault property. |
 | `eso.externalSecret.*` | Vault import into trust namespace on every cluster. |
 | `eso.hubExport.secretName` | Hub-only **Secret** written by hub **CronJob** (`hub-export` label). |
-| `includeApiCA` / `includeIngressCA` / `includeSystemTrustStore` | CA inputs for export **CronJob** and hub gather. |
+| `includeApiCA` / `includeIngressCA` | CA inputs for export **CronJob** and hub gather. |
 | `additionalCaBundles` | Extra PEMs as **Bundle** **`inLine`** sources. |
 | `cronJob` / `syncJob` | Hub periodic **hub-export** + **Proxy** patch; all clusters one-shot **Proxy** patch. |
 
@@ -440,7 +448,6 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | image.tag | string | `"v1"` |  |
 | includeApiCA | bool | `true` | Include API CA PEMs in hub-export and spoke export (default true). |
 | includeIngressCA | bool | `true` | Include default ingress router-ca PEMs when API access allows. |
-| includeSystemTrustStore | bool | `true` | Include cluster system trust store (trusted-ca-bundle) in export merges. |
 | nameOverride | string | `""` |  |
 | namespace | string | `"vp-manage-proxy-cluster-ca"` |  |
 | podHostUsers | bool | `false` |  |
@@ -461,9 +468,10 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | targetNamespace | string | `"openshift-config"` |  |
 | trustManager.bundle.argoCDSyncWave | int | `7` |  |
 | trustManager.bundle.sources | list | `[{"secret":{"includeAllKeys":true,"selector":{"matchLabels":{"cluster-ca.vp.io/component":"export"}}}},{"secret":{"key":"ca-bundle.crt","selector":{"matchLabels":{"cluster-ca.vp.io/component":"hub-export"}}}}]` | trust-manager Bundle spec.sources. Spoke PushSecrets label hub Secrets with labels.export; hub gather job labels hub-export Secret with labels.hubExport. |
+| trustManager.bundle.useDefaultCAs | bool | `true` | Prepend useDefaultCAs to Bundle sources (platform CA package). Merged at trust-manager reconcile time. |
 | trustManager.bundleName | string | `""` | Bundle metadata.name and target ConfigMap name in targetNamespace (defaults to configMapName). |
 | trustManager.enabled | bool | `true` | When true, render trust.cert-manager.io/v1alpha1 Bundle and write merged PEM to the trust source ConfigMap. |
-| trustManager.labeledBundle | object | `{"argoCDSyncWave":7,"enabled":true,"name":"","namespaceSelector":{"matchLabels":{"cluster-ca.vp.io/trust-bundle-target":"true"}},"targetKey":""}` | Optional second Bundle: same sources/target key shape as the primary Bundle, different namespaceSelector. Target ConfigMap name = labeledBundle.name (default <configMapName>-labeled). Label namespaces in your own GitOps. |
+| trustManager.labeledBundle | object | `{"argoCDSyncWave":7,"enabled":false,"name":"","namespaceSelector":{"matchLabels":{"cluster-ca.vp.io/trust-bundle-target":"true"}},"targetKey":""}` | Optional second Bundle: same sources/target key shape as the primary Bundle, different namespaceSelector. Target ConfigMap name = labeledBundle.name (default <configMapName>-labeled). Label namespaces in your own GitOps. |
 | trustManager.labels.clusterGroup | string | `"cluster-ca.vp.io/cluster-group"` |  |
 | trustManager.labels.component | string | `"cluster-ca.vp.io/component"` |  |
 | trustManager.labels.export | string | `"export"` |  |

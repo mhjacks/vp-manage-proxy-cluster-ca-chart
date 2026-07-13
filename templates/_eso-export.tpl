@@ -36,8 +36,6 @@ Do not set hostUsers: false with root-based images (causes setgroups EINVAL unde
       value: {{ .Values.includeIngressCA | quote }}
     - name: INCLUDE_API_CA
       value: {{ .Values.includeApiCA | quote }}
-    - name: INCLUDE_SYSTEM_TRUST_STORE
-      value: {{ .Values.includeSystemTrustStore | quote }}
   command:
     - /bin/bash
     - /scripts/export-cron.sh

@@ -73,7 +73,7 @@ Each cluster (hub and spokes) renders:
 
 | Resource | Purpose |
 |----------|---------|
-| Export **CronJob** | Normalizes API/ingress/system-trust CAs into a local **Secret** |
+| Export **CronJob** | Normalizes API/ingress CAs into a local **Secret** |
 | **PushSecret** | Pushes **`ca-bundle.crt`** to Vault **`pushsecrets/cluster-ca#<cluster>`** |
 | **ExternalSecret** | Imports all cluster properties from Vault into **`trustManager.trustNamespace`** |
 | **Bundle** | Merges **`export`** + **`hub-export`** labeled **Secrets** into **`configMapName`** |
@@ -158,9 +158,17 @@ spec:
 
 ### Injecting extra CA material (`additionalCaBundles`)
 
-When **`trustManager.enabled`** is **true**, each **`additionalCaBundles`** entry is a **Bundle** **`inLine`** source. The hub job does not re-merge those PEMs into **`hub-export`**.
+With **`trustManager.enabled`** (default), the merged **Proxy** **ConfigMap** is:
 
-When **`trustManager.enabled`** is **false**, the hub job merges **`additionalCaBundles`** with hub CAs before writing **`configMapName`**.
+**`useDefaultCAs`** (platform trust store) + cluster export/hub-export **Secrets** + **`additionalCaBundles`** (**`inLine`**).
+
+| Source | Where merged | Purpose |
+|--------|--------------|---------|
+| **`trustManager.bundle.useDefaultCAs: true`** (default) | trust-manager **Bundle** | System/public CAs at Bundle merge time |
+| Export / hub-export **Secrets** | **Bundle** | Per-cluster API/ingress CAs |
+| **`additionalCaBundles`** | **Bundle** **`inLine`** | Your extra PEMs, additive to the above |
+
+When **`trustManager.enabled`** is **false**, the hub job merges **`additionalCaBundles`** with hub CAs before writing **`configMapName`** (no **Bundle**).
 
 ### Example: init container TLS precheck for workload HTTPS
 
@@ -273,7 +281,7 @@ applications:
 | `eso.export.*` | Export namespace, **CronJob** schedule, **PushSecret** local **Secret**, Vault property. |
 | `eso.externalSecret.*` | Vault import into trust namespace on every cluster. |
 | `eso.hubExport.secretName` | Hub-only **Secret** written by hub **CronJob** (`hub-export` label). |
-| `includeApiCA` / `includeIngressCA` / `includeSystemTrustStore` | CA inputs for export **CronJob** and hub gather. |
+| `includeApiCA` / `includeIngressCA` | CA inputs for export **CronJob** and hub gather. |
 | `additionalCaBundles` | Extra PEMs as **Bundle** **`inLine`** sources. |
 | `cronJob` / `syncJob` | Hub periodic **hub-export** + **Proxy** patch; all clusters one-shot **Proxy** patch. |
 

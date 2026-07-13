@@ -15,15 +15,18 @@ tests:
           path: metadata.name
           value: vp-pattern-proxy-ca-bundle
       - equal:
-          path: spec.sources[0].secret.selector.matchLabels["cluster-ca.vp.io/component"]
-          value: export
-      - equal:
-          path: spec.sources[0].secret.includeAllKeys
+          path: spec.sources[0].useDefaultCAs
           value: true
-      - notExists:
-          path: spec.sources[0].secret.key
       - equal:
           path: spec.sources[1].secret.selector.matchLabels["cluster-ca.vp.io/component"]
+          value: export
+      - equal:
+          path: spec.sources[1].secret.includeAllKeys
+          value: true
+      - notExists:
+          path: spec.sources[1].secret.key
+      - equal:
+          path: spec.sources[2].secret.selector.matchLabels["cluster-ca.vp.io/component"]
           value: hub-export
       - equal:
           path: spec.target.configMap.key
@@ -87,15 +90,18 @@ tests:
     asserts:
       - lengthEqual:
           path: spec.sources
-          count: 1
+          count: 2
       - equal:
-          path: spec.sources[0].secret.includeAllKeys
+          path: spec.sources[0].useDefaultCAs
           value: true
       - equal:
-          path: spec.sources[0].secret.selector.matchExpressions[0].key
+          path: spec.sources[1].secret.includeAllKeys
+          value: true
+      - equal:
+          path: spec.sources[1].secret.selector.matchExpressions[0].key
           value: cluster-ca.vp.io/cluster-group
       - notExists:
-          path: spec.sources[0].secret.key
+          path: spec.sources[1].secret.key
   - it: renders named configMap source
     set:
       trustManager:
@@ -106,10 +112,10 @@ tests:
                 key: ca.crt
     asserts:
       - equal:
-          path: spec.sources[0].configMap.name
+          path: spec.sources[1].configMap.name
           value: static-ca
       - equal:
-          path: spec.sources[0].configMap.key
+          path: spec.sources[1].configMap.key
           value: ca.crt
   - it: appends additionalCaBundles as inLine Bundle sources
     set:
@@ -117,5 +123,16 @@ tests:
         - TEST-INLINE-CA-PEM
     asserts:
       - matchRegex:
-          path: spec.sources[2].inLine
+          path: spec.sources[3].inLine
           pattern: TEST-INLINE-CA-PEM
+  - it: omits useDefaultCAs when disabled
+    set:
+      trustManager:
+        bundle:
+          useDefaultCAs: false
+    asserts:
+      - notExists:
+          path: spec.sources[0].useDefaultCAs
+      - equal:
+          path: spec.sources[0].secret.selector.matchLabels["cluster-ca.vp.io/component"]
+          value: export

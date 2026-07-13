@@ -10,7 +10,6 @@ tests:
         export:
           enabled: true
       includeIngressCA: true
-      includeSystemTrustStore: true
     asserts:
       - isKind:
           of: CronJob
@@ -21,9 +20,4 @@ tests:
           path: spec.jobTemplate.spec.template.spec.containers[0].env
           content:
             name: INCLUDE_INGRESS_CA
-            value: "true"
-      - contains:
-          path: spec.jobTemplate.spec.template.spec.containers[0].env
-          content:
-            name: INCLUDE_SYSTEM_TRUST_STORE
             value: "true"

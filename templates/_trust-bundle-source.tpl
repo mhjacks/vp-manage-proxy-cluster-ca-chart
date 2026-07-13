@@ -38,23 +38,33 @@ Secret/configMap: name and selector are mutually exclusive; key and includeAllKe
 {{- else if $src.inLine }}
 - inLine: |
 {{ $src.inLine | nindent 4 }}
+{{- else if $src.useDefaultCAs }}
+- useDefaultCAs: true
 {{- else }}
-{{- fail "trustManager.bundle.sources[] entry requires secret, configMap, or inLine" }}
+{{- fail "trustManager.bundle.sources[] entry requires secret, configMap, inLine, or useDefaultCAs" }}
 {{- end }}
 {{- end }}
 
 {{/*
-All Bundle spec.sources entries: configured sources plus additionalCaBundles as inLine.
+All Bundle spec.sources entries: optional useDefaultCAs, configured sources, additionalCaBundles as inLine.
+useDefaultCAs adds the platform default CA package at Bundle merge time (keeps export/Vault payloads small).
 */}}
 {{- define "vpProxyCa.trustBundleSources" }}
 {{- $root := . }}
 {{- $bundle := .Values.trustManager.bundle | default dict }}
 {{- $sources := $bundle.sources | default list }}
-{{- if eq (len $sources) 0 }}
-{{- fail "trustManager.bundle.sources must contain at least one entry (secret selector, configMap, or inLine)" }}
+{{- $useDefaultCAs := $bundle.useDefaultCAs }}
+{{- if eq ($useDefaultCAs | toString) "true" }}
+- useDefaultCAs: true
 {{- end }}
+{{- if eq (len $sources) 0 }}
+{{- if ne ($useDefaultCAs | toString) "true" }}
+{{- fail "trustManager.bundle.sources must contain at least one entry when useDefaultCAs is false" }}
+{{- end }}
+{{- else }}
 {{- range $sources }}
 {{ include "vpProxyCa.trustBundleSourceItem" . }}
+{{- end }}
 {{- end }}
 {{- range $root.Values.additionalCaBundles }}
 {{ include "vpProxyCa.trustBundleSourceItem" (dict "inLine" .) }}

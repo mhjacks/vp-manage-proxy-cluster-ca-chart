@@ -14,7 +14,6 @@ CONFIG_MAP_NAME="${CONFIG_MAP_NAME:?}"
 TARGET_NAMESPACE="${TARGET_NAMESPACE:-openshift-config}"
 INCLUDE_INGRESS_CA="${INCLUDE_INGRESS_CA:-false}"
 INCLUDE_API_CA="${INCLUDE_API_CA:-true}"
-INCLUDE_SYSTEM_TRUST_STORE="${INCLUDE_SYSTEM_TRUST_STORE:-false}"
 ADDITIONAL_CA_FILE="${ADDITIONAL_CA_FILE:-}"
 
 WRITE_HUB_EXPORT="${WRITE_HUB_EXPORT:-true}"
@@ -43,28 +42,11 @@ write_hub_export_enabled() {
   esac
 }
 
-include_system_trust_store_enabled() {
-  case "${INCLUDE_SYSTEM_TRUST_STORE:-false}" in
-    true|True|TRUE|yes|Yes|YES|1) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 include_api_ca_enabled() {
   case "${INCLUDE_API_CA:-true}" in
     true|True|TRUE|yes|Yes|YES|1) return 0 ;;
     *) return 1 ;;
   esac
-}
-
-extract_trusted_ca_bundle() {
-  local dest="$1"
-  if oc get configmap trusted-ca-bundle -n openshift-config-managed \
-    -o jsonpath='{.data.ca-bundle\.crt}' >"$dest" 2>/dev/null && [[ -s "$dest" ]]; then
-    log "trusted-ca-bundle ($(wc -c <"$dest") bytes)"
-    return 0
-  fi
-  return 1
 }
 
 extract_ingress_ca() {
@@ -192,9 +174,6 @@ if write_hub_export_enabled; then
 
   if include_api_ca_enabled; then
     extract_kube_apiserver_ca "$RAW_DIR/hub-api.crt" || true
-  fi
-  if include_system_trust_store_enabled; then
-    extract_trusted_ca_bundle "$RAW_DIR/hub-trusted.crt" || true
   fi
   if [[ "$INCLUDE_INGRESS_CA" == "true" ]]; then
     extract_ingress_ca "$RAW_DIR/hub-ingress.crt" || true
