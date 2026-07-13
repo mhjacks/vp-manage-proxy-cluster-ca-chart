@@ -518,7 +518,7 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | trustManager.trustNamespace | string | `"cert-manager"` | Namespace where trust-manager reads Bundle sources (must match TrustManager.spec.trustManagerConfig.trustNamespace). |
 | trustTest.activeDeadlineSeconds | int | `900` |  |
 | trustTest.argoCDSyncWave | int | `13` |  |
-| trustTest.caBundle.configMapName | string | `""` | Empty: by-label Bundle ConfigMap name when byLabelBundle.enabled, else configMapName. |
+| trustTest.caBundle.configMapName | string | `""` | Empty: configMapName (by-namespace-name / Proxy bundle). Set to the by-label Bundle name to use labeled distribution. |
 | trustTest.caBundle.key | string | `"ca-bundle.crt"` |  |
 | trustTest.caBundle.mountPath | string | `"/etc/pki/trust"` |  |
 | trustTest.caWaitSeconds | int | `300` |  |
@@ -535,7 +535,7 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | trustTest.ingress.additional | list | `[]` | Extra ingress checks expanded per cluster apps domain (hostTemplate) or fixed url. - name: config-demo   hostTemplate: "config-demo-config-demo.%s"   path: "/index.html" - name: vault   url: "https://vault.example.com/v1/sys/health" |
 | trustTest.ingress.console | object | `{"enabled":true,"hostTemplate":"console-openshift-console.%s","path":"/","routeName":"console","routeNamespace":"openshift-console"}` | Default ingress TLS check uses the OpenShift console on the cluster apps domain. |
 | trustTest.ingress.console.hostTemplate | string | `"console-openshift-console.%s"` | %s is the ingress domain (apps.<cluster>.<base>) from Ingress.config or derived from the API URL. |
-| trustTest.namespaces | list | `[]` | Namespaces to install the tester (label with cluster-ca.vp.io/trust-bundle-target for by-label Bundle). Each entry may be a string namespace name or an object with name, optional additionalIngress, optional caBundle.configMapName. |
+| trustTest.namespaces | list | `[]` | Namespaces to install the tester. Each must receive configMapName via byNamespaceNameBundle (list the namespace there) or set per-namespace caBundle.configMapName. By-label distribution is optional; set trustTest.caBundle.configMapName to the by-label Bundle name to use it. Each entry may be a string namespace name or an object with name, optional additionalIngress, optional caBundle.configMapName. |
 | trustTest.requireRemoteReachable | bool | `false` | When false, unreachable remote endpoints log a warning instead of failing the job. |
 | trustTest.resources.limits.cpu | string | `"500m"` |  |
 | trustTest.resources.limits.memory | string | `"256Mi"` |  |

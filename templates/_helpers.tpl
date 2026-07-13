@@ -210,6 +210,8 @@ trustTest.namespaces entry: string name or { name, additionalIngress?, caBundle?
 
 {{/*
 ConfigMap name for the mounted CA bundle in a trustTest namespace.
+Defaults to configMapName (by-namespace-name / Proxy bundle). Set trustTest.caBundle.configMapName
+or per-namespace caBundle.configMapName to mount the by-label Bundle instead.
 */}}
 {{- define "vpProxyCa.trustTestCaBundleConfigMapName" -}}
 {{- $root := index . 0 -}}
@@ -218,8 +220,6 @@ ConfigMap name for the mounted CA bundle in a trustTest namespace.
 {{- $entry.caBundle.configMapName -}}
 {{- else if $root.Values.trustTest.caBundle.configMapName -}}
 {{- $root.Values.trustTest.caBundle.configMapName -}}
-{{- else if and $root.Values.trustManager.enabled $root.Values.trustManager.byLabelBundle.enabled -}}
-{{- include "vpProxyCa.byLabelTrustBundleName" $root -}}
 {{- else -}}
 {{- $root.Values.configMapName -}}
 {{- end -}}

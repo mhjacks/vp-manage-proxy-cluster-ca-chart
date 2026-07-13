@@ -179,8 +179,11 @@ additionalCaBundles: []
 trustTest:
   # -- When true, render trust-test CronJobs in trustTest.namespaces (requires non-empty list).
   enabled: false
-  # -- Namespaces to install the tester (label with cluster-ca.vp.io/trust-bundle-target for by-label Bundle).
-  # Each entry may be a string namespace name or an object with name, optional additionalIngress, optional caBundle.configMapName.
+  # -- Namespaces to install the tester. Each must receive configMapName via byNamespaceNameBundle
+  # (list the namespace there) or set per-namespace caBundle.configMapName. By-label distribution
+  # is optional; set trustTest.caBundle.configMapName to the by-label Bundle name to use it.
+  # Each entry may be a string namespace name or an object with name, optional additionalIngress,
+  # optional caBundle.configMapName.
   namespaces: []
   schedule: "0 */6 * * *"
   suspend: false
@@ -206,7 +209,7 @@ trustTest:
     tag: latest
     pullPolicy: IfNotPresent
   caBundle:
-    # -- Empty: by-label Bundle ConfigMap name when byLabelBundle.enabled, else configMapName.
+    # -- Empty: configMapName (by-namespace-name / Proxy bundle). Set to the by-label Bundle name to use labeled distribution.
     configMapName: ""
     key: ca-bundle.crt
     mountPath: /etc/pki/trust

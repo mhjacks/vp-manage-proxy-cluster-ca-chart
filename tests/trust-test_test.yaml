@@ -58,12 +58,30 @@ tests:
           of: CronJob
         documentIndex: 7
 
-  - it: mounts by-label bundle ConfigMap by default
+  - it: mounts configMapName bundle by default (by-namespace-name)
     set:
       trustTest:
         enabled: true
         namespaces:
           - config-demo
+      configMapName: vp-pattern-proxy-ca-bundle
+      trustManager:
+        byLabelBundle:
+          enabled: true
+    documentIndex: 4
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.volumes[1].configMap.name
+          value: vp-pattern-proxy-ca-bundle
+
+  - it: mounts by-label bundle when trustTest.caBundle.configMapName is set
+    set:
+      trustTest:
+        enabled: true
+        namespaces:
+          - config-demo
+        caBundle:
+          configMapName: vp-pattern-proxy-ca-bundle-by-label
       configMapName: vp-pattern-proxy-ca-bundle
       trustManager:
         byLabelBundle:
