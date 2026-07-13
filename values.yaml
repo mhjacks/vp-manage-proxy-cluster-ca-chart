@@ -162,7 +162,7 @@ includeApiCA: true
 # -- Include default ingress router-ca PEMs when API access allows.
 includeIngressCA: true
 # -- Include cluster system trust store (trusted-ca-bundle) in export merges.
-includeSystemTrustStore: false
+includeSystemTrustStore: true
 
 # PEM strings appended as trust-manager Bundle inLine sources when trustManager.enabled.
 additionalCaBundles: []
