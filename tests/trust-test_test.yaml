@@ -31,7 +31,7 @@ tests:
           - config-demo
           - hello-world
       trustManager:
-        labeledBundle:
+        byLabelBundle:
           enabled: true
       configMapName: vp-pattern-proxy-ca-bundle
     asserts:
@@ -58,7 +58,7 @@ tests:
           of: CronJob
         documentIndex: 7
 
-  - it: mounts labeled bundle ConfigMap by default
+  - it: mounts by-label bundle ConfigMap by default
     set:
       trustTest:
         enabled: true
@@ -66,13 +66,13 @@ tests:
           - config-demo
       configMapName: vp-pattern-proxy-ca-bundle
       trustManager:
-        labeledBundle:
+        byLabelBundle:
           enabled: true
     documentIndex: 4
     asserts:
       - equal:
           path: spec.jobTemplate.spec.template.spec.volumes[1].configMap.name
-          value: vp-pattern-proxy-ca-bundle-opt-in
+          value: vp-pattern-proxy-ca-bundle-by-label
 
   - it: renders trust-test CronJob with ose-cli image
     set:
@@ -118,6 +118,54 @@ tests:
           content:
             name: ADDITIONAL_INGRESS_JSON
             value: "[]"
+
+  - it: discovers cluster domains from the ESO import Secret by default
+    set:
+      trustTest:
+        enabled: true
+        namespaces:
+          - config-demo
+      trustManager:
+        trustNamespace: cert-manager
+      eso:
+        externalSecret:
+          targetSecretName: cluster-ca-pushsecrets-import
+    documentIndex: 4
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: DISCOVER_EXPORT_SECRET
+            value: "true"
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: EXPORT_SECRET_NAMESPACE
+            value: cert-manager
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: EXPORT_SECRET_NAME
+            value: cluster-ca-pushsecrets-import
+
+  - it: grants read access to the ESO import Secret
+    set:
+      trustTest:
+        enabled: true
+        namespaces:
+          - config-demo
+      eso:
+        externalSecret:
+          targetSecretName: cluster-ca-pushsecrets-import
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: ["secrets"]
+            resourceNames: ["cluster-ca-pushsecrets-import"]
+            verbs: ["get"]
 
   - it: merges global and per-namespace additional ingress checks
     set:

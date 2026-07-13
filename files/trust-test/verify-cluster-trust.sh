@@ -8,6 +8,9 @@ CA_WAIT_SECONDS="${CA_WAIT_SECONDS:-300}"
 CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-15}"
 MAX_TIME="${MAX_TIME:-45}"
 DISCOVER_MANAGED_CLUSTERS="${DISCOVER_MANAGED_CLUSTERS:-true}"
+DISCOVER_EXPORT_SECRET="${DISCOVER_EXPORT_SECRET:-true}"
+EXPORT_SECRET_NAMESPACE="${EXPORT_SECRET_NAMESPACE:-cert-manager}"
+EXPORT_SECRET_NAME="${EXPORT_SECRET_NAME:-cluster-ca-pushsecrets-import}"
 INCLUDE_LOCAL_CLUSTER="${INCLUDE_LOCAL_CLUSTER:-true}"
 REQUIRE_REMOTE_REACHABLE="${REQUIRE_REMOTE_REACHABLE:-false}"
 HUB_CLUSTER_DOMAIN="${HUB_CLUSTER_DOMAIN:-}"
@@ -129,6 +132,11 @@ add_api_check() {
   local url="$2"
   [[ -z "${url}" ]] && return 0
   local existing
+  for existing in "${API_URLS[@]:-}"; do
+    if [[ "${existing}" == "${url}" ]]; then
+      return 0
+    fi
+  done
   for existing in "${API_NAMES[@]:-}"; do
     if [[ "${existing}" == "${name}" ]]; then
       return 0
@@ -143,6 +151,11 @@ add_ingress_check() {
   local url="$2"
   [[ -z "${url}" ]] && return 0
   local existing
+  for existing in "${INGRESS_URLS[@]:-}"; do
+    if [[ "${existing}" == "${url}" ]]; then
+      return 0
+    fi
+  done
   for existing in "${INGRESS_LABELS[@]:-}"; do
     if [[ "${existing}" == "${label}" ]]; then
       return 0
@@ -277,6 +290,29 @@ discover_hub_target() {
   add_cluster_checks "hub:${domain}" "${domain}" "" "false"
 }
 
+discover_export_secret_targets() {
+  if [[ "${DISCOVER_EXPORT_SECRET}" != "true" ]]; then
+    return 0
+  fi
+  local ns="${EXPORT_SECRET_NAMESPACE:-}"
+  local secret_name="${EXPORT_SECRET_NAME:-}"
+  [[ -z "${ns}" || -z "${secret_name}" ]] && return 0
+
+  if ! oc get secret "${secret_name}" -n "${ns}" >/dev/null 2>&1; then
+    warn "Export secret ${ns}/${secret_name} not found; skipping export-based cluster discovery"
+    return 0
+  fi
+
+  local cluster_key
+  log "Discovering cluster domains from export secret ${ns}/${secret_name}"
+  while IFS= read -r cluster_key; do
+    [[ -z "${cluster_key}" ]] && continue
+    add_cluster_checks "export:${cluster_key}" "${cluster_key}" "" "false"
+  done < <(
+    oc get secret "${secret_name}" -n "${ns}" -o jsonpath='{range $k,$v := .data}{printf "%s\n" $k}{end}' 2>/dev/null || true
+  )
+}
+
 discover_managed_cluster_targets() {
   if [[ "${DISCOVER_MANAGED_CLUSTERS}" != "true" ]]; then
     return 0
@@ -393,6 +429,7 @@ build_targets() {
     discover_local_targets
   fi
   discover_hub_target
+  discover_export_secret_targets
   discover_managed_cluster_targets
   ((${#API_NAMES[@]} + ${#INGRESS_LABELS[@]} > 0)) || die "No test targets discovered or configured"
 }

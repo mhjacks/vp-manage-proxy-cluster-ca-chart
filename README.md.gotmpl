@@ -32,23 +32,26 @@ Prerequisites on each cluster:
 
 | Bundle | Values | ConfigMap in target namespaces |
 |--------|--------|--------------------------------|
-| **Primary** (always) | default | **`configMapName`** in **`targetNamespace`** (**`openshift-config`**) |
-| **Opt-in** (optional) | **`trustManager.labeledBundle.enabled: true`** | **`<configMapName>-opt-in`** (or **`labeledBundle.name`**) in namespaces matching **`labeledBundle.namespaceSelector`** |
+| **by-namespace-name** (default) | **`trustManager.byNamespaceNameBundle`** | **`configMapName`** in namespaces listed in **`byNamespaceNameBundle.namespaces`** (defaults to **`[targetNamespace]`**, **`openshift-config`**) |
+| **by-label** (optional) | **`trustManager.byLabelBundle.enabled: true`** | **`<configMapName>-by-label`** (or **`byLabelBundle.name`**) in namespaces matching **`byLabelBundle.namespaceSelector`** |
 
-Primary **Bundle** targets **`openshift-config`** only (unless **`trustManager.bundle.namespaceSelector`** overrides). For workload namespaces, enable the second **Bundle** and label namespaces in your own GitOps — this chart does not manage **Namespace** objects.
+Use **by-label** for namespaces you create yourself in the pattern GitOps (label them with **`cluster-ca.vp.io/trust-bundle-target: "true"`**). Use **by-namespace-name** for OpenShift system namespaces such as **`openshift-config`** that you cannot label — list them explicitly under **`byNamespaceNameBundle.namespaces`**. This chart does not manage **Namespace** objects.
 
-Example — Proxy **ConfigMap** plus opt-in app namespaces:
+Example — Proxy **ConfigMap** in **`openshift-config`** plus by-label app namespaces:
 
 ```yaml
 trustManager:
-  labeledBundle:
+  byNamespaceNameBundle:
+    namespaces:
+      - openshift-config
+  byLabelBundle:
     enabled: true
     namespaceSelector:
       matchLabels:
         cluster-ca.vp.io/trust-bundle-target: "true"
 ```
 
-Label workload namespaces with **`cluster-ca.vp.io/trust-bundle-target: "true"`**. They receive **`ConfigMap/<configMapName>-opt-in`** with the same **`ca-bundle.crt`** PEM as **`openshift-config`**.
+Label workload namespaces with **`cluster-ca.vp.io/trust-bundle-target: "true"`**. They receive **`ConfigMap/<configMapName>-by-label`** with the same **`ca-bundle.crt`** PEM as **`openshift-config`**.
 
 Default **`trustManager.bundle.sources`**:
 
@@ -174,11 +177,11 @@ When **`trustManager.enabled`** is **false**, the hub job merges **`additionalCa
 
 When **`trustTest.enabled`** is **true** and **`trustTest.namespaces`** lists one or more namespaces, the chart renders a **CronJob** in each namespace that:
 
-1. Mounts the merged CA bundle **`ConfigMap`** (default: opt-in Bundle name **`<configMapName>-opt-in`** when **`trustManager.labeledBundle.enabled`**).
+1. Mounts the merged CA bundle **`ConfigMap`** (default: by-label Bundle name **`<configMapName>-by-label`** when **`trustManager.byLabelBundle.enabled`**).
 2. Waits until **`ca-bundle.crt`** is non-empty.
-3. Runs **`curl --cacert`** against discovered or configured **API** (`https://api.<cluster>.<base>:6443/readyz`, no **`apps.`** segment) and **ingress** endpoints on the cluster **`apps.<cluster>.<base>`** domain for the local cluster, hub, and ACM **ManagedClusters** (when present). The default ingress check is the **OpenShift console** (`console-openshift-console.<apps-domain>`); on the local cluster the **`console`** **Route** in **`openshift-console`** is used when discoverable.
+3. Runs **`curl --cacert`** against discovered or configured **API** (`https://api.<cluster>.<base>:6443/readyz`, no **`apps.`** segment) and **ingress** endpoints on the cluster **`apps.<cluster>.<base>`** domain for the local cluster, hub, clusters listed as keys in the ESO import **Secret** (**`pushsecrets/cluster-ca`** properties), and ACM **ManagedClusters** (when present). The default ingress check is the **OpenShift console** (`console-openshift-console.<apps-domain>`); on the local cluster the **`console`** **Route** in **`openshift-console`** is used when discoverable.
 
-Target namespaces must receive the opt-in Bundle (label with **`cluster-ca.vp.io/trust-bundle-target: "true"`**). Example:
+Target namespaces must receive the by-label Bundle (label with **`cluster-ca.vp.io/trust-bundle-target: "true"`**). Example:
 
 ```yaml
 trustTest:

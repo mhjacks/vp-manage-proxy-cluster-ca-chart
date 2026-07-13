@@ -218,8 +218,8 @@ ConfigMap name for the mounted CA bundle in a trustTest namespace.
 {{- $entry.caBundle.configMapName -}}
 {{- else if $root.Values.trustTest.caBundle.configMapName -}}
 {{- $root.Values.trustTest.caBundle.configMapName -}}
-{{- else if and $root.Values.trustManager.enabled $root.Values.trustManager.labeledBundle.enabled -}}
-{{- include "vpProxyCa.labeledTrustBundleName" $root -}}
+{{- else if and $root.Values.trustManager.enabled $root.Values.trustManager.byLabelBundle.enabled -}}
+{{- include "vpProxyCa.byLabelTrustBundleName" $root -}}
 {{- else -}}
 {{- $root.Values.configMapName -}}
 {{- end -}}

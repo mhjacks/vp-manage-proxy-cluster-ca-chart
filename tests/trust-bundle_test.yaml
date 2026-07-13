@@ -32,14 +32,40 @@ tests:
           path: spec.target.configMap.key
           value: ca-bundle.crt
       - equal:
-          path: spec.target.namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          path: spec.target.namespaceSelector.matchExpressions[0].key
+          value: kubernetes.io/metadata.name
+      - equal:
+          path: spec.target.namespaceSelector.matchExpressions[0].operator
+          value: In
+      - equal:
+          path: spec.target.namespaceSelector.matchExpressions[0].values[0]
           value: openshift-config
+      - equal:
+          path: metadata.labels["app.kubernetes.io/component"]
+          value: trust-bundle-by-namespace-name
   - it: skips Bundle when trustManager is disabled
     set:
       trustManager.enabled: false
     asserts:
       - hasDocuments:
           count: 0
+  - it: skips Bundle when byNamespaceNameBundle is disabled
+    set:
+      trustManager.byNamespaceNameBundle.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: targets multiple explicit namespaces when configured
+    set:
+      trustManager.byNamespaceNameBundle.namespaces:
+        - openshift-config
+        - openshift-ingress
+    asserts:
+      - equal:
+          path: spec.target.namespaceSelector.matchExpressions[0].values
+          value:
+            - openshift-config
+            - openshift-ingress
   - it: honors custom bundle target key
     set:
       configMapName: custom-proxy-ca

@@ -15,6 +15,11 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: {{ $wave | quote }}
 rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ .Values.eso.externalSecret.targetSecretName | default .Values.eso.externalSecret.name | quote }}
+    verbs: ["get"]
   - apiGroups: ["cluster.open-cluster-management.io"]
     resources: ["managedclusters"]
     verbs: ["get", "list"]
@@ -142,6 +147,12 @@ spec:
                   value: {{ include "vpProxyCa.trustTestAdditionalIngressJson" (list $root .) | default "[]" | quote }}
                 - name: DISCOVER_MANAGED_CLUSTERS
                   value: {{ $root.Values.trustTest.discoverManagedClusters | default true | quote }}
+                - name: DISCOVER_EXPORT_SECRET
+                  value: {{ $root.Values.trustTest.discoverExportSecret | default true | quote }}
+                - name: EXPORT_SECRET_NAMESPACE
+                  value: {{ $root.Values.trustTest.exportSecret.namespace | default $root.Values.trustManager.trustNamespace | quote }}
+                - name: EXPORT_SECRET_NAME
+                  value: {{ $root.Values.trustTest.exportSecret.name | default ($root.Values.eso.externalSecret.targetSecretName | default $root.Values.eso.externalSecret.name) | quote }}
                 - name: INCLUDE_LOCAL_CLUSTER
                   value: {{ $root.Values.trustTest.includeLocalCluster | default true | quote }}
                 - name: REQUIRE_REMOTE_REACHABLE

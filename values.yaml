@@ -66,9 +66,16 @@ trustManager:
             matchLabels:
               cluster-ca.vp.io/component: hub-export
           key: ca-bundle.crt
-  # -- Optional second Bundle: same sources/target key shape as the primary Bundle, different namespaceSelector.
-  # Target ConfigMap name = labeledBundle.name (default <configMapName>-opt-in). Label namespaces in your own GitOps.
-  labeledBundle:
+  # -- by-namespace-name Bundle: injects configMapName into explicit OpenShift system namespaces.
+  # Use for openshift-config and other platform namespaces you cannot label in GitOps.
+  byNamespaceNameBundle:
+    enabled: true
+    argoCDSyncWave: 7
+    # -- Namespace names (defaults to [targetNamespace] when empty).
+    namespaces: []
+  # -- by-label Bundle: same sources/target key as by-namespace-name, namespaceSelector matchLabels.
+  # Use for workload namespaces you create and label in the pattern GitOps.
+  byLabelBundle:
     enabled: true
     name: ""
     argoCDSyncWave: 7
@@ -172,7 +179,7 @@ additionalCaBundles: []
 trustTest:
   # -- When true, render trust-test CronJobs in trustTest.namespaces (requires non-empty list).
   enabled: false
-  # -- Namespaces to install the tester (label with cluster-ca.vp.io/trust-bundle-target for labeled Bundle).
+  # -- Namespaces to install the tester (label with cluster-ca.vp.io/trust-bundle-target for by-label Bundle).
   # Each entry may be a string namespace name or an object with name, optional additionalIngress, optional caBundle.configMapName.
   namespaces: []
   schedule: "0 */6 * * *"
@@ -183,6 +190,13 @@ trustTest:
   failedJobsHistoryLimit: 3
   caWaitSeconds: 300
   discoverManagedClusters: true
+  # -- Discover cluster domains from ESO import Secret keys (Vault pushsecrets/cluster-ca properties).
+  discoverExportSecret: true
+  exportSecret:
+    # -- Namespace of the import Secret (defaults to trustManager.trustNamespace).
+    namespace: ""
+    # -- Import Secret name (defaults to eso.externalSecret.targetSecretName).
+    name: ""
   includeLocalCluster: true
   # -- When false, unreachable remote endpoints log a warning instead of failing the job.
   requireRemoteReachable: false
@@ -192,7 +206,7 @@ trustTest:
     tag: latest
     pullPolicy: IfNotPresent
   caBundle:
-    # -- Empty: labeled Bundle ConfigMap name when labeledBundle.enabled, else configMapName.
+    # -- Empty: by-label Bundle ConfigMap name when byLabelBundle.enabled, else configMapName.
     configMapName: ""
     key: ca-bundle.crt
     mountPath: /etc/pki/trust

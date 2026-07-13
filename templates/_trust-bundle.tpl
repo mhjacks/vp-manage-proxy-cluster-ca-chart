@@ -1,13 +1,24 @@
 {{/*
-Primary Bundle namespaceSelector: targetNamespace (openshift-config) unless trustManager.bundle.namespaceSelector is set.
+by-namespace-name Bundle namespaceSelector: explicit namespace names (default [targetNamespace]),
+unless trustManager.bundle.namespaceSelector is set for backward compatibility.
 */}}
 {{- define "vpProxyCa.trustBundleNamespaceSelector" -}}
 {{- $bundleCfg := .Values.trustManager.bundle | default dict -}}
 {{- if hasKey $bundleCfg "namespaceSelector" -}}
 {{- $bundleCfg.namespaceSelector | toYaml -}}
 {{- else -}}
-matchLabels:
-  kubernetes.io/metadata.name: {{ .Values.targetNamespace | quote }}
+{{- $nsCfg := .Values.trustManager.byNamespaceNameBundle | default dict -}}
+{{- $namespaces := $nsCfg.namespaces -}}
+{{- if not $namespaces -}}
+{{- $namespaces = list .Values.targetNamespace -}}
+{{- end -}}
+matchExpressions:
+  - key: kubernetes.io/metadata.name
+    operator: In
+    values:
+{{- range $namespaces }}
+      - {{ . | quote }}
+{{- end }}
 {{- end -}}
 {{- end -}}
 
@@ -16,17 +27,22 @@ matchLabels:
 {{- if hasKey $bundleCfg "namespaceSelector" -}}
 {{- $bundleCfg.namespaceSelector | toJson -}}
 {{- else -}}
-{{- dict "matchLabels" (dict "kubernetes.io/metadata.name" .Values.targetNamespace) | toJson -}}
+{{- $nsCfg := .Values.trustManager.byNamespaceNameBundle | default dict -}}
+{{- $namespaces := $nsCfg.namespaces -}}
+{{- if not $namespaces -}}
+{{- $namespaces = list .Values.targetNamespace -}}
+{{- end -}}
+{{- dict "matchExpressions" (list (dict "key" "kubernetes.io/metadata.name" "operator" "In" "values" $namespaces)) | toJson -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
-Opt-in Bundle metadata.name (ConfigMap name in matched namespaces). Defaults to <primary-bundle-name>-opt-in.
+by-label Bundle metadata.name (ConfigMap name in matched namespaces). Defaults to <primary-bundle-name>-by-label.
 */}}
-{{- define "vpProxyCa.labeledTrustBundleName" -}}
-{{- if .Values.trustManager.labeledBundle.name -}}
-{{- .Values.trustManager.labeledBundle.name -}}
+{{- define "vpProxyCa.byLabelTrustBundleName" -}}
+{{- if .Values.trustManager.byLabelBundle.name -}}
+{{- .Values.trustManager.byLabelBundle.name -}}
 {{- else -}}
-{{- printf "%s-opt-in" (include "vpProxyCa.trustBundleName" .) | trunc 63 | trimSuffix "-" -}}
+{{- printf "%s-by-label" (include "vpProxyCa.trustBundleName" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 {{- end -}}

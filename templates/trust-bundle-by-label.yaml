@@ -1,6 +1,6 @@
-{{- if and .Values.trustManager.enabled .Values.trustManager.labeledBundle.enabled }}
-{{- $cfg := .Values.trustManager.labeledBundle }}
-{{- $bundleName := include "vpProxyCa.labeledTrustBundleName" . }}
+{{- if and .Values.trustManager.enabled .Values.trustManager.byLabelBundle.enabled }}
+{{- $cfg := .Values.trustManager.byLabelBundle }}
+{{- $bundleName := include "vpProxyCa.byLabelTrustBundleName" . }}
 {{- $targetKey := $cfg.targetKey | default .Values.trustManager.targetKey }}
 apiVersion: trust.cert-manager.io/v1alpha1
 kind: Bundle
@@ -11,7 +11,7 @@ metadata:
   labels:
     app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/component: trust-bundle-labeled
+    app.kubernetes.io/component: trust-bundle-by-label
 spec:
   sources:
 {{ include "vpProxyCa.trustBundleSources" . | nindent 4 }}

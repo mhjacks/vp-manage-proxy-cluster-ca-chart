@@ -27,23 +27,26 @@ Prerequisites on each cluster:
 
 | Bundle | Values | ConfigMap in target namespaces |
 |--------|--------|--------------------------------|
-| **Primary** (always) | default | **`configMapName`** in **`targetNamespace`** (**`openshift-config`**) |
-| **Opt-in** (optional) | **`trustManager.labeledBundle.enabled: true`** | **`<configMapName>-opt-in`** (or **`labeledBundle.name`**) in namespaces matching **`labeledBundle.namespaceSelector`** |
+| **by-namespace-name** (default) | **`trustManager.byNamespaceNameBundle`** | **`configMapName`** in namespaces listed in **`byNamespaceNameBundle.namespaces`** (defaults to **`[targetNamespace]`**, **`openshift-config`**) |
+| **by-label** (optional) | **`trustManager.byLabelBundle.enabled: true`** | **`<configMapName>-by-label`** (or **`byLabelBundle.name`**) in namespaces matching **`byLabelBundle.namespaceSelector`** |
 
-Primary **Bundle** targets **`openshift-config`** only (unless **`trustManager.bundle.namespaceSelector`** overrides). For workload namespaces, enable the second **Bundle** and label namespaces in your own GitOps — this chart does not manage **Namespace** objects.
+Use **by-label** for namespaces you create yourself in the pattern GitOps (label them with **`cluster-ca.vp.io/trust-bundle-target: "true"`**). Use **by-namespace-name** for OpenShift system namespaces such as **`openshift-config`** that you cannot label — list them explicitly under **`byNamespaceNameBundle.namespaces`**. This chart does not manage **Namespace** objects.
 
-Example — Proxy **ConfigMap** plus opt-in app namespaces:
+Example — Proxy **ConfigMap** in **`openshift-config`** plus by-label app namespaces:
 
 ```yaml
 trustManager:
-  labeledBundle:
+  byNamespaceNameBundle:
+    namespaces:
+      - openshift-config
+  byLabelBundle:
     enabled: true
     namespaceSelector:
       matchLabels:
         cluster-ca.vp.io/trust-bundle-target: "true"
 ```
 
-Label workload namespaces with **`cluster-ca.vp.io/trust-bundle-target: "true"`**. They receive **`ConfigMap/<configMapName>-opt-in`** with the same **`ca-bundle.crt`** PEM as **`openshift-config`**.
+Label workload namespaces with **`cluster-ca.vp.io/trust-bundle-target: "true"`**. They receive **`ConfigMap/<configMapName>-by-label`** with the same **`ca-bundle.crt`** PEM as **`openshift-config`**.
 
 Default **`trustManager.bundle.sources`**:
 
@@ -169,11 +172,11 @@ When **`trustManager.enabled`** is **false**, the hub job merges **`additionalCa
 
 When **`trustTest.enabled`** is **true** and **`trustTest.namespaces`** lists one or more namespaces, the chart renders a **CronJob** in each namespace that:
 
-1. Mounts the merged CA bundle **`ConfigMap`** (default: opt-in Bundle name **`<configMapName>-opt-in`** when **`trustManager.labeledBundle.enabled`**).
+1. Mounts the merged CA bundle **`ConfigMap`** (default: by-label Bundle name **`<configMapName>-by-label`** when **`trustManager.byLabelBundle.enabled`**).
 2. Waits until **`ca-bundle.crt`** is non-empty.
-3. Runs **`curl --cacert`** against discovered or configured **API** (`https://api.<cluster>.<base>:6443/readyz`, no **`apps.`** segment) and **ingress** endpoints on the cluster **`apps.<cluster>.<base>`** domain for the local cluster, hub, and ACM **ManagedClusters** (when present). The default ingress check is the **OpenShift console** (`console-openshift-console.<apps-domain>`); on the local cluster the **`console`** **Route** in **`openshift-console`** is used when discoverable.
+3. Runs **`curl --cacert`** against discovered or configured **API** (`https://api.<cluster>.<base>:6443/readyz`, no **`apps.`** segment) and **ingress** endpoints on the cluster **`apps.<cluster>.<base>`** domain for the local cluster, hub, clusters listed as keys in the ESO import **Secret** (**`pushsecrets/cluster-ca`** properties), and ACM **ManagedClusters** (when present). The default ingress check is the **OpenShift console** (`console-openshift-console.<apps-domain>`); on the local cluster the **`console`** **Route** in **`openshift-console`** is used when discoverable.
 
-Target namespaces must receive the opt-in Bundle (label with **`cluster-ca.vp.io/trust-bundle-target: "true"`**). Example:
+Target namespaces must receive the by-label Bundle (label with **`cluster-ca.vp.io/trust-bundle-target: "true"`**). Example:
 
 ```yaml
 trustTest:
@@ -498,8 +501,10 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | trustManager.bundle.sources | list | `[{"secret":{"includeAllKeys":true,"selector":{"matchLabels":{"cluster-ca.vp.io/component":"export"}}}},{"secret":{"key":"ca-bundle.crt","selector":{"matchLabels":{"cluster-ca.vp.io/component":"hub-export"}}}}]` | trust-manager Bundle spec.sources. Spoke PushSecrets label hub Secrets with labels.export; hub gather job labels hub-export Secret with labels.hubExport. |
 | trustManager.bundle.useDefaultCAs | bool | `true` | Prepend useDefaultCAs to Bundle sources (platform CA package). Merged at trust-manager reconcile time. |
 | trustManager.bundleName | string | `""` | Bundle metadata.name and target ConfigMap name in targetNamespace (defaults to configMapName). |
+| trustManager.byLabelBundle | object | `{"argoCDSyncWave":7,"enabled":true,"name":"","namespaceSelector":{"matchLabels":{"cluster-ca.vp.io/trust-bundle-target":"true"}},"targetKey":""}` | by-label Bundle: same sources/target key as by-namespace-name, namespaceSelector matchLabels. Use for workload namespaces you create and label in the pattern GitOps. |
+| trustManager.byNamespaceNameBundle | object | `{"argoCDSyncWave":7,"enabled":true,"namespaces":[]}` | by-namespace-name Bundle: injects configMapName into explicit OpenShift system namespaces. Use for openshift-config and other platform namespaces you cannot label in GitOps. |
+| trustManager.byNamespaceNameBundle.namespaces | list | `[]` | Namespace names (defaults to [targetNamespace] when empty). |
 | trustManager.enabled | bool | `true` | When true, render trust.cert-manager.io/v1alpha1 Bundle and write merged PEM to the trust source ConfigMap. |
-| trustManager.labeledBundle | object | `{"argoCDSyncWave":7,"enabled":true,"name":"","namespaceSelector":{"matchLabels":{"cluster-ca.vp.io/trust-bundle-target":"true"}},"targetKey":""}` | Optional second Bundle: same sources/target key shape as the primary Bundle, different namespaceSelector. Target ConfigMap name = labeledBundle.name (default <configMapName>-opt-in). Label namespaces in your own GitOps. |
 | trustManager.labels.clusterGroup | string | `"cluster-ca.vp.io/cluster-group"` |  |
 | trustManager.labels.component | string | `"cluster-ca.vp.io/component"` |  |
 | trustManager.labels.export | string | `"export"` |  |
@@ -513,12 +518,15 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | trustManager.trustNamespace | string | `"cert-manager"` | Namespace where trust-manager reads Bundle sources (must match TrustManager.spec.trustManagerConfig.trustNamespace). |
 | trustTest.activeDeadlineSeconds | int | `900` |  |
 | trustTest.argoCDSyncWave | int | `13` |  |
-| trustTest.caBundle.configMapName | string | `""` | Empty: labeled Bundle ConfigMap name when labeledBundle.enabled, else configMapName. |
+| trustTest.caBundle.configMapName | string | `""` | Empty: by-label Bundle ConfigMap name when byLabelBundle.enabled, else configMapName. |
 | trustTest.caBundle.key | string | `"ca-bundle.crt"` |  |
 | trustTest.caBundle.mountPath | string | `"/etc/pki/trust"` |  |
 | trustTest.caWaitSeconds | int | `300` |  |
+| trustTest.discoverExportSecret | bool | `true` | Discover cluster domains from ESO import Secret keys (Vault pushsecrets/cluster-ca properties). |
 | trustTest.discoverManagedClusters | bool | `true` |  |
 | trustTest.enabled | bool | `false` | When true, render trust-test CronJobs in trustTest.namespaces (requires non-empty list). |
+| trustTest.exportSecret.name | string | `""` | Import Secret name (defaults to eso.externalSecret.targetSecretName). |
+| trustTest.exportSecret.namespace | string | `""` | Namespace of the import Secret (defaults to trustManager.trustNamespace). |
 | trustTest.failedJobsHistoryLimit | int | `3` |  |
 | trustTest.image.pullPolicy | string | `"IfNotPresent"` |  |
 | trustTest.image.repository | string | `"registry.redhat.io/openshift4/ose-cli"` | ose-cli includes oc and curl; avoids setgroups errors from root-based imperative-container. |
@@ -527,7 +535,7 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | trustTest.ingress.additional | list | `[]` | Extra ingress checks expanded per cluster apps domain (hostTemplate) or fixed url. - name: config-demo   hostTemplate: "config-demo-config-demo.%s"   path: "/index.html" - name: vault   url: "https://vault.example.com/v1/sys/health" |
 | trustTest.ingress.console | object | `{"enabled":true,"hostTemplate":"console-openshift-console.%s","path":"/","routeName":"console","routeNamespace":"openshift-console"}` | Default ingress TLS check uses the OpenShift console on the cluster apps domain. |
 | trustTest.ingress.console.hostTemplate | string | `"console-openshift-console.%s"` | %s is the ingress domain (apps.<cluster>.<base>) from Ingress.config or derived from the API URL. |
-| trustTest.namespaces | list | `[]` | Namespaces to install the tester (label with cluster-ca.vp.io/trust-bundle-target for labeled Bundle). Each entry may be a string namespace name or an object with name, optional additionalIngress, optional caBundle.configMapName. |
+| trustTest.namespaces | list | `[]` | Namespaces to install the tester (label with cluster-ca.vp.io/trust-bundle-target for by-label Bundle). Each entry may be a string namespace name or an object with name, optional additionalIngress, optional caBundle.configMapName. |
 | trustTest.requireRemoteReachable | bool | `false` | When false, unreachable remote endpoints log a warning instead of failing the job. |
 | trustTest.resources.limits.cpu | string | `"500m"` |  |
 | trustTest.resources.limits.memory | string | `"256Mi"` |  |
