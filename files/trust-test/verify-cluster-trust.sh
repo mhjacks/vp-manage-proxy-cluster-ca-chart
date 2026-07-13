@@ -7,18 +7,23 @@ CA_BUNDLE_PATH="${CA_BUNDLE_PATH:-/etc/pki/trust/ca-bundle.crt}"
 CA_WAIT_SECONDS="${CA_WAIT_SECONDS:-300}"
 CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-15}"
 MAX_TIME="${MAX_TIME:-45}"
-ROUTE_NAME="${ROUTE_NAME:-config-demo}"
-ROUTE_NAMESPACE="${ROUTE_NAMESPACE:-config-demo}"
 DISCOVER_MANAGED_CLUSTERS="${DISCOVER_MANAGED_CLUSTERS:-true}"
 INCLUDE_LOCAL_CLUSTER="${INCLUDE_LOCAL_CLUSTER:-true}"
 REQUIRE_REMOTE_REACHABLE="${REQUIRE_REMOTE_REACHABLE:-false}"
 HUB_CLUSTER_DOMAIN="${HUB_CLUSTER_DOMAIN:-}"
 LOCAL_CLUSTER_DOMAIN="${LOCAL_CLUSTER_DOMAIN:-}"
 TRUST_TEST_TARGETS_JSON="${TRUST_TEST_TARGETS_JSON:-[]}"
+CONSOLE_INGRESS_ENABLED="${CONSOLE_INGRESS_ENABLED:-true}"
+CONSOLE_HOST_TEMPLATE="${CONSOLE_HOST_TEMPLATE:-console-openshift-console.apps.%s}"
+CONSOLE_PATH="${CONSOLE_PATH:-/}"
+CONSOLE_ROUTE_NAME="${CONSOLE_ROUTE_NAME:-console}"
+CONSOLE_ROUTE_NAMESPACE="${CONSOLE_ROUTE_NAMESPACE:-openshift-console}"
+ADDITIONAL_INGRESS_JSON="${ADDITIONAL_INGRESS_JSON:-[]}"
 
-declare -a TARGET_NAMES=()
-declare -a TARGET_APIS=()
-declare -a TARGET_INGRESS=()
+declare -a API_NAMES=()
+declare -a API_URLS=()
+declare -a INGRESS_LABELS=()
+declare -a INGRESS_URLS=()
 
 log() { echo "[cluster-trust-test] $*"; }
 warn() { echo "[cluster-trust-test] WARN: $*" >&2; }
@@ -38,9 +43,16 @@ wait_for_ca_bundle() {
   die "CA bundle missing or empty at ${CA_BUNDLE_PATH}"
 }
 
-ingress_url_for_domain() {
-  local domain="$1"
-  printf 'https://%s-%s.apps.%s/index.html' "${ROUTE_NAME}" "${ROUTE_NAMESPACE}" "${domain}"
+normalize_path() {
+  local path="$1"
+  [[ -z "${path}" || "${path}" == "/" ]] && printf '/' && return 0
+  [[ "${path}" == /* ]] && printf '%s' "${path}" || printf '/%s' "${path}"
+}
+
+build_https_url() {
+  local host="$1"
+  local path="$2"
+  printf 'https://%s%s' "${host}" "$(normalize_path "${path}")"
 }
 
 api_url_for_domain() {
@@ -48,26 +60,118 @@ api_url_for_domain() {
   printf 'https://api.%s:6443/readyz' "${domain}"
 }
 
-add_target() {
+console_url_for_domain() {
+  local domain="$1"
+  local host
+  host="$(printf "${CONSOLE_HOST_TEMPLATE}" "${domain}")"
+  build_https_url "${host}" "${CONSOLE_PATH}"
+}
+
+discover_local_console_url() {
+  local route_host
+  route_host="$(oc get route "${CONSOLE_ROUTE_NAME}" -n "${CONSOLE_ROUTE_NAMESPACE}" \
+    -o jsonpath='{.spec.host}' 2>/dev/null || true)"
+  [[ -z "${route_host}" ]] && return 1
+  build_https_url "${route_host}" "${CONSOLE_PATH}"
+}
+
+add_api_check() {
   local name="$1"
-  local api_url="$2"
-  local ingress_url="$3"
+  local url="$2"
+  [[ -z "${url}" ]] && return 0
   local existing
-  for existing in "${TARGET_NAMES[@]:-}"; do
+  for existing in "${API_NAMES[@]:-}"; do
     if [[ "${existing}" == "${name}" ]]; then
       return 0
     fi
   done
-  TARGET_NAMES+=("${name}")
-  TARGET_APIS+=("${api_url}")
-  TARGET_INGRESS+=("${ingress_url}")
+  API_NAMES+=("${name}")
+  API_URLS+=("${url}")
 }
 
-add_target_for_domain() {
-  local name="$1"
+add_ingress_check() {
+  local label="$1"
+  local url="$2"
+  [[ -z "${url}" ]] && return 0
+  local existing
+  for existing in "${INGRESS_LABELS[@]:-}"; do
+    if [[ "${existing}" == "${label}" ]]; then
+      return 0
+    fi
+  done
+  INGRESS_LABELS+=("${label}")
+  INGRESS_URLS+=("${url}")
+}
+
+add_console_ingress_for_domain() {
+  local label_prefix="$1"
   local domain="$2"
+  local prefer_local_discovery="${3:-false}"
+  local url=""
+
+  [[ "${CONSOLE_INGRESS_ENABLED}" == "true" ]] || return 0
+  if [[ "${prefer_local_discovery}" == "true" ]] && url="$(discover_local_console_url)"; then
+    add_ingress_check "${label_prefix} console" "${url}"
+    return 0
+  fi
+  add_ingress_check "${label_prefix} console" "$(console_url_for_domain "${domain}")"
+}
+
+expand_additional_ingress_for_domain() {
+  local label_prefix="$1"
+  local domain="$2"
+  if ! command -v python3 >/dev/null 2>&1; then
+    [[ "${ADDITIONAL_INGRESS_JSON}" != "[]" && -n "${ADDITIONAL_INGRESS_JSON}" ]] && \
+      warn "python3 unavailable; skipping ADDITIONAL_INGRESS_JSON for ${label_prefix}"
+    return 0
+  fi
+  python3 - "${label_prefix}" "${domain}" "${ADDITIONAL_INGRESS_JSON}" <<'PY'
+import json, sys
+
+label_prefix, domain, raw = sys.argv[1], sys.argv[2], sys.argv[3] or "[]"
+try:
+    entries = json.loads(raw)
+except json.JSONDecodeError as exc:
+    print(f"invalid ADDITIONAL_INGRESS_JSON: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+if not isinstance(entries, list):
+    print("ADDITIONAL_INGRESS_JSON must be a JSON array", file=sys.stderr)
+    sys.exit(1)
+
+def norm_path(path):
+    if not path or path == "/":
+        return "/"
+    return path if path.startswith("/") else f"/{path}"
+
+for item in entries:
+    if not isinstance(item, dict):
+        continue
+    name = item.get("name") or item.get("label") or "additional"
+    url = item.get("url") or item.get("ingressUrl") or item.get("ingress") or ""
+    if not url:
+        template = item.get("hostTemplate") or item.get("host") or ""
+        if template and domain:
+            host = template % domain
+            path = norm_path(item.get("path") or "/")
+            url = f"https://{host}{path}"
+    if url:
+        print(f"{label_prefix} {name}\t{url}")
+PY
+  while IFS=$'\t' read -r label url; do
+    [[ -z "${label}" || -z "${url}" ]] && continue
+    add_ingress_check "${label}" "${url}"
+  done
+}
+
+add_cluster_checks() {
+  local label_prefix="$1"
+  local domain="$2"
+  local prefer_local_console="${3:-false}"
   [[ -z "${domain}" ]] && return 0
-  add_target "${name}" "$(api_url_for_domain "${domain}")" "$(ingress_url_for_domain "${domain}")"
+  add_api_check "${label_prefix}" "$(api_url_for_domain "${domain}")"
+  add_console_ingress_for_domain "${label_prefix}" "${domain}" "${prefer_local_console}"
+  expand_additional_ingress_for_domain "${label_prefix}" "${domain}"
 }
 
 discover_local_cluster_domain() {
@@ -89,7 +193,7 @@ discover_local_cluster_domain() {
 }
 
 discover_local_targets() {
-  local domain route_host
+  local domain
   domain="${LOCAL_CLUSTER_DOMAIN:-}"
   if [[ -z "${domain}" ]]; then
     domain="$(discover_local_cluster_domain || true)"
@@ -98,20 +202,13 @@ discover_local_targets() {
     warn "Could not determine local cluster domain"
     return 0
   fi
-  add_target_for_domain "local:${domain}" "${domain}"
-
-  route_host="$(oc get route "${ROUTE_NAME}" -n "${ROUTE_NAMESPACE}" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
-  if [[ -n "${route_host}" ]]; then
-    add_target "local-route:${route_host}" \
-      "$(api_url_for_domain "${domain}")" \
-      "https://${route_host}/index.html"
-  fi
+  add_cluster_checks "local:${domain}" "${domain}" "true"
 }
 
 discover_hub_target() {
   local domain="${HUB_CLUSTER_DOMAIN:-}"
   [[ -z "${domain}" ]] && return 0
-  add_target_for_domain "hub:${domain}" "${domain}"
+  add_cluster_checks "hub:${domain}" "${domain}" "false"
 }
 
 discover_managed_cluster_targets() {
@@ -127,7 +224,7 @@ discover_managed_cluster_targets() {
     [[ -z "${api_url}" ]] && continue
     if [[ "${api_url}" =~ https://api\.([^:/]+) ]]; then
       domain="${BASH_REMATCH[1]}"
-      add_target_for_domain "managed:${mc_name}" "${domain}"
+      add_cluster_checks "managed:${mc_name}" "${domain}" "false"
     else
       warn "Skipping ${mc_name}: unrecognized API URL ${api_url}"
     fi
@@ -142,12 +239,12 @@ load_configured_targets() {
       warn "python3 unavailable; skipping TRUST_TEST_TARGETS_JSON"
     return 0
   fi
-  python3 - "${TRUST_TEST_TARGETS_JSON}" <<'PY'
+  python3 - "${TRUST_TEST_TARGETS_JSON}" "${CONSOLE_INGRESS_ENABLED}" "${CONSOLE_HOST_TEMPLATE}" "${CONSOLE_PATH}" <<'PY'
 import json, sys
 
-raw = sys.argv[1] or "[]"
+raw, console_enabled, host_template, console_path = sys.argv[1:5]
 try:
-    targets = json.loads(raw)
+    targets = json.loads(raw or "[]")
 except json.JSONDecodeError as exc:
     print(f"invalid TRUST_TEST_TARGETS_JSON: {exc}", file=sys.stderr)
     sys.exit(1)
@@ -155,6 +252,11 @@ except json.JSONDecodeError as exc:
 if not isinstance(targets, list):
     print("TRUST_TEST_TARGETS_JSON must be a JSON array", file=sys.stderr)
     sys.exit(1)
+
+def norm_path(path):
+    if not path or path == "/":
+        return "/"
+    return path if path.startswith("/") else f"/{path}"
 
 for item in targets:
     if not isinstance(item, dict):
@@ -165,18 +267,34 @@ for item in targets:
     ingress_url = item.get("ingressUrl") or item.get("ingress") or ""
     if domain and not api_url:
         api_url = f"https://api.{domain}:6443/readyz"
-    if domain and not ingress_url:
-        route_name = item.get("routeName") or "config-demo"
-        route_ns = item.get("routeNamespace") or "config-demo"
-        ingress_url = f"https://{route_name}-{route_ns}.apps.{domain}/index.html"
-    if api_url or ingress_url:
-        print("\t".join([name, api_url or "-", ingress_url or "-"]))
+    if domain and not ingress_url and console_enabled.lower() == "true":
+        host = host_template % domain
+        ingress_url = f"https://{host}{norm_path(console_path)}"
+    if api_url:
+        print("\t".join(["API", name, api_url]))
+    if ingress_url:
+        print("\t".join(["INGRESS", f"{name} ingress", ingress_url]))
+    extras = item.get("additionalIngress") or item.get("additionalUrls") or []
+    if isinstance(extras, list):
+        for extra in extras:
+            if not isinstance(extra, dict):
+                continue
+            label = extra.get("name") or extra.get("label") or "additional"
+            url = extra.get("url") or extra.get("ingressUrl") or ""
+            if not url:
+                template = extra.get("hostTemplate") or extra.get("host") or ""
+                if template and domain:
+                    url = f"https://{template % domain}{norm_path(extra.get('path') or '/')}"
+            if url:
+                print("\t".join(["INGRESS", f"{name} {label}", url]))
 PY
-  while IFS=$'\t' read -r name api_url ingress_url; do
-    [[ -z "${name}" ]] && continue
-    add_target "${name}" \
-      "$( [[ "${api_url}" == "-" ]] && echo "" || echo "${api_url}" )" \
-      "$( [[ "${ingress_url}" == "-" ]] && echo "" || echo "${ingress_url}" )"
+  while IFS=$'\t' read -r kind name url; do
+    [[ -z "${kind}" || -z "${name}" || -z "${url}" ]] && continue
+    if [[ "${kind}" == "API" ]]; then
+      add_api_check "${name}" "${url}"
+    else
+      add_ingress_check "${name}" "${url}"
+    fi
   done
 }
 
@@ -187,7 +305,7 @@ build_targets() {
   fi
   discover_hub_target
   discover_managed_cluster_targets
-  ((${#TARGET_NAMES[@]} > 0)) || die "No test targets discovered or configured"
+  ((${#API_NAMES[@]} + ${#INGRESS_LABELS[@]} > 0)) || die "No test targets discovered or configured"
 }
 
 curl_tls() {
@@ -229,14 +347,17 @@ main() {
   build_targets
 
   local failures=0 i
-  for ((i = 0; i < ${#TARGET_NAMES[@]}; i++)); do
-    log "Target ${TARGET_NAMES[i]}"
-    curl_tls "${TARGET_NAMES[i]} API" "${TARGET_APIS[i]}" || failures=$((failures + 1))
-    curl_tls "${TARGET_NAMES[i]} ingress" "${TARGET_INGRESS[i]}" || failures=$((failures + 1))
+  for ((i = 0; i < ${#API_NAMES[@]}; i++)); do
+    log "API target ${API_NAMES[i]}"
+    curl_tls "${API_NAMES[i]} API" "${API_URLS[i]}" || failures=$((failures + 1))
+  done
+  for ((i = 0; i < ${#INGRESS_LABELS[@]}; i++)); do
+    log "Ingress target ${INGRESS_LABELS[i]}"
+    curl_tls "${INGRESS_LABELS[i]}" "${INGRESS_URLS[i]}" || failures=$((failures + 1))
   done
 
   ((${failures} == 0)) || die "${failures} TLS check(s) failed"
-  log "All TLS checks passed for ${#TARGET_NAMES[@]} target(s)"
+  log "All TLS checks passed (${#API_NAMES[@]} API, ${#INGRESS_LABELS[@]} ingress)"
 }
 
 main "$@"

@@ -53,8 +53,8 @@ subjects:
 {{- range .Values.trustTest.namespaces }}
 {{- $nsName := include "vpProxyCa.trustTestNamespaceName" . }}
 {{- $caConfigMap := include "vpProxyCa.trustTestCaBundleConfigMapName" (list $root .) }}
-{{- $routeName := include "vpProxyCa.trustTestRouteName" (list $root .) }}
-{{- $routeNamespace := include "vpProxyCa.trustTestRouteNamespace" (list $root .) }}
+{{- $additionalIngress := include "vpProxyCa.trustTestAdditionalIngressJson" (list $root .) }}
+{{- $console := $root.Values.trustTest.ingress.console | default dict }}
 
 ---
 apiVersion: v1
@@ -129,10 +129,18 @@ spec:
                   value: {{ $caPath | quote }}
                 - name: CA_WAIT_SECONDS
                   value: {{ $root.Values.trustTest.caWaitSeconds | default 300 | quote }}
-                - name: ROUTE_NAME
-                  value: {{ $routeName | quote }}
-                - name: ROUTE_NAMESPACE
-                  value: {{ $routeNamespace | quote }}
+                - name: CONSOLE_INGRESS_ENABLED
+                  value: {{ ($console.enabled | default true) | quote }}
+                - name: CONSOLE_HOST_TEMPLATE
+                  value: {{ ($console.hostTemplate | default "console-openshift-console.apps.%s") | quote }}
+                - name: CONSOLE_PATH
+                  value: {{ ($console.path | default "/") | quote }}
+                - name: CONSOLE_ROUTE_NAME
+                  value: {{ ($console.routeName | default "console") | quote }}
+                - name: CONSOLE_ROUTE_NAMESPACE
+                  value: {{ ($console.routeNamespace | default "openshift-console") | quote }}
+                - name: ADDITIONAL_INGRESS_JSON
+                  value: {{ $additionalIngress | quote }}
                 - name: DISCOVER_MANAGED_CLUSTERS
                   value: {{ $root.Values.trustTest.discoverManagedClusters | default true | quote }}
                 - name: INCLUDE_LOCAL_CLUSTER

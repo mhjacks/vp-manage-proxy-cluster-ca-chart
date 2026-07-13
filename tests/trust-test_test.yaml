@@ -86,24 +86,44 @@ tests:
           path: spec.jobTemplate.spec.template.spec.containers[0].image
           pattern: "^registry\\.redhat\\.io/openshift4/ose-cli:"
 
-  - it: honors per-namespace route overrides
+  - it: defaults ingress checks to OpenShift console host template
     set:
       trustTest:
         enabled: true
         namespaces:
-          - name: hello-world
-            route:
-              name: hello-world
-              namespace: hello-world
+          - config-demo
     documentIndex: 4
     asserts:
       - contains:
           path: spec.jobTemplate.spec.template.spec.containers[0].env
           content:
-            name: ROUTE_NAME
-            value: hello-world
+            name: CONSOLE_INGRESS_ENABLED
+            value: "true"
       - contains:
           path: spec.jobTemplate.spec.template.spec.containers[0].env
           content:
-            name: ROUTE_NAMESPACE
-            value: hello-world
+            name: CONSOLE_HOST_TEMPLATE
+            value: "console-openshift-console.apps.%s"
+
+  - it: merges global and per-namespace additional ingress checks
+    set:
+      trustTest:
+        enabled: true
+        ingress:
+          additional:
+            - name: config-demo
+              hostTemplate: "config-demo-config-demo.apps.%s"
+              path: "/index.html"
+        namespaces:
+          - name: hello-world
+            additionalIngress:
+              - name: hello-world
+                hostTemplate: "hello-world-hello-world.apps.%s"
+                path: "/index.html"
+    documentIndex: 4
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: ADDITIONAL_INGRESS_JSON
+            value: '[{"hostTemplate":"config-demo-config-demo.apps.%s","name":"config-demo","path":"/index.html"},{"hostTemplate":"hello-world-hello-world.apps.%s","name":"hello-world","path":"/index.html"}]'

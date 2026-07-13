@@ -173,7 +173,7 @@ trustTest:
   # -- When true, render trust-test CronJobs in trustTest.namespaces (requires non-empty list).
   enabled: false
   # -- Namespaces to install the tester (label with cluster-ca.vp.io/trust-bundle-target for labeled Bundle).
-  # Each entry may be a string namespace name or an object with name, optional route, optional caBundle.configMapName.
+  # Each entry may be a string namespace name or an object with name, optional additionalIngress, optional caBundle.configMapName.
   namespaces: []
   schedule: "0 */6 * * *"
   suspend: false
@@ -196,11 +196,22 @@ trustTest:
     configMapName: ""
     key: ca-bundle.crt
     mountPath: /etc/pki/trust
-  route:
-    # -- Default ingress route for apps.<clusterDomain> pattern when not set per namespace.
-    name: config-demo
-    namespace: config-demo
-  # -- Optional explicit targets merged with ACM/local discovery.
+  ingress:
+    # -- Default ingress TLS check uses the OpenShift console route host pattern per cluster domain.
+    console:
+      enabled: true
+      hostTemplate: "console-openshift-console.apps.%s"
+      path: "/"
+      routeName: console
+      routeNamespace: openshift-console
+    # -- Extra ingress checks expanded per discovered cluster domain (hostTemplate) or fixed url.
+    # - name: config-demo
+    #   hostTemplate: "config-demo-config-demo.apps.%s"
+    #   path: "/index.html"
+    # - name: vault
+    #   url: "https://vault.example.com/v1/sys/health"
+    additional: []
+  # -- Optional explicit targets merged with ACM/local discovery (supports additionalIngress per target).
   targets: []
   resources:
     requests:

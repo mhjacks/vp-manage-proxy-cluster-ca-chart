@@ -176,23 +176,25 @@ When **`trustTest.enabled`** is **true** and **`trustTest.namespaces`** lists on
 
 1. Mounts the merged CA bundle **`ConfigMap`** (default: opt-in Bundle name **`<configMapName>-opt-in`** when **`trustManager.labeledBundle.enabled`**).
 2. Waits until **`ca-bundle.crt`** is non-empty.
-3. Runs **`curl --cacert`** against discovered or configured **API** (`https://api.<domain>:6443/readyz`) and **ingress** (`https://<route>-<ns>.apps.<domain>/...`) endpoints for the local cluster, hub, and ACM **ManagedClusters** (when present).
+3. Runs **`curl --cacert`** against discovered or configured **API** (`https://api.<domain>:6443/readyz`) and **ingress** endpoints for the local cluster, hub, and ACM **ManagedClusters** (when present). The default ingress check is the **OpenShift console** URL (`console-openshift-console.apps.<domain>`); on the local cluster the **`console`** **Route** in **`openshift-console`** is used when discoverable.
 
-Target namespaces must receive the labeled Bundle (label with **`cluster-ca.vp.io/trust-bundle-target: "true"`**). Example:
+Target namespaces must receive the opt-in Bundle (label with **`cluster-ca.vp.io/trust-bundle-target: "true"`**). Example:
 
 ```yaml
 trustTest:
   enabled: true
   namespaces:
     - config-demo
-    - name: hello-world
-      route:
-        name: hello-world
-        namespace: hello-world
-  route:
-    name: config-demo
-    namespace: config-demo
+  ingress:
+    console:
+      enabled: true
+    additional:
+      - name: config-demo
+        hostTemplate: "config-demo-config-demo.apps.%s"
+        path: "/index.html"
 ```
+
+Per-namespace extra checks: add **`additionalIngress`** on a namespace entry. Fixed URLs (not tied to a cluster domain) use **`url`** instead of **`hostTemplate`**. Explicit targets via **`trustTest.targets`** also support **`additionalIngress`** per target.
 
 Set **`trustTest.requireRemoteReachable: true`** to fail when remote clusters are unreachable (default: unreachable endpoints log a warning; TLS verification failures always fail the job).
 

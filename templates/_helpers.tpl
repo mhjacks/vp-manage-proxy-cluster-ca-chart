@@ -198,7 +198,7 @@ Image for trust-test CronJobs. Defaults to ose-cli (includes oc and curl).
 {{- end }}
 
 {{/*
-trustTest.namespaces entry: string name or { name, route?, caBundle? }.
+trustTest.namespaces entry: string name or { name, additionalIngress?, caBundle? }.
 */}}
 {{- define "vpProxyCa.trustTestNamespaceName" -}}
 {{- if kindIs "string" . -}}
@@ -226,28 +226,15 @@ ConfigMap name for the mounted CA bundle in a trustTest namespace.
 {{- end }}
 
 {{/*
-Route name/namespace for ingress TLS checks in a trustTest namespace.
+Merged global + per-namespace additional ingress checks for trust-test CronJob env JSON.
 */}}
-{{- define "vpProxyCa.trustTestRouteName" -}}
+{{- define "vpProxyCa.trustTestAdditionalIngressJson" -}}
 {{- $root := index . 0 -}}
 {{- $entry := index . 1 -}}
-{{- if and (not (kindIs "string" $entry)) $entry.route $entry.route.name -}}
-{{- $entry.route.name -}}
-{{- else if $root.Values.trustTest.route.name -}}
-{{- $root.Values.trustTest.route.name -}}
-{{- else -}}
-config-demo
+{{- $global := ($root.Values.trustTest.ingress.additional | default list) -}}
+{{- $local := list -}}
+{{- if and (not (kindIs "string" $entry)) $entry.additionalIngress -}}
+{{- $local = $entry.additionalIngress -}}
 {{- end -}}
-{{- end }}
-
-{{- define "vpProxyCa.trustTestRouteNamespace" -}}
-{{- $root := index . 0 -}}
-{{- $entry := index . 1 -}}
-{{- if and (not (kindIs "string" $entry)) $entry.route $entry.route.namespace -}}
-{{- $entry.route.namespace -}}
-{{- else if $root.Values.trustTest.route.namespace -}}
-{{- $root.Values.trustTest.route.namespace -}}
-{{- else -}}
-{{- include "vpProxyCa.trustTestNamespaceName" $entry -}}
+{{- concat $global $local | toJson -}}
 {{- end -}}
-{{- end }}
