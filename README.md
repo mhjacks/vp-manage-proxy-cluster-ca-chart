@@ -471,7 +471,7 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | trustManager.bundle.useDefaultCAs | bool | `true` | Prepend useDefaultCAs to Bundle sources (platform CA package). Merged at trust-manager reconcile time. |
 | trustManager.bundleName | string | `""` | Bundle metadata.name and target ConfigMap name in targetNamespace (defaults to configMapName). |
 | trustManager.enabled | bool | `true` | When true, render trust.cert-manager.io/v1alpha1 Bundle and write merged PEM to the trust source ConfigMap. |
-| trustManager.labeledBundle | object | `{"argoCDSyncWave":7,"enabled":false,"name":"","namespaceSelector":{"matchLabels":{"cluster-ca.vp.io/trust-bundle-target":"true"}},"targetKey":""}` | Optional second Bundle: same sources/target key shape as the primary Bundle, different namespaceSelector. Target ConfigMap name = labeledBundle.name (default <configMapName>-labeled). Label namespaces in your own GitOps. |
+| trustManager.labeledBundle | object | `{"argoCDSyncWave":7,"enabled":true,"name":"","namespaceSelector":{"matchLabels":{"cluster-ca.vp.io/trust-bundle-target":"true"}},"targetKey":""}` | Optional second Bundle: same sources/target key shape as the primary Bundle, different namespaceSelector. Target ConfigMap name = labeledBundle.name (default <configMapName>-labeled). Label namespaces in your own GitOps. |
 | trustManager.labels.clusterGroup | string | `"cluster-ca.vp.io/cluster-group"` |  |
 | trustManager.labels.component | string | `"cluster-ca.vp.io/component"` |  |
 | trustManager.labels.export | string | `"export"` |  |
