@@ -113,19 +113,18 @@ spec:
             app.kubernetes.io/component: trust-test
         spec:
           restartPolicy: Never
+{{- include "vpProxyCa.podHostUsers" $root | nindent 10 }}
           serviceAccountName: {{ include "vpProxyCa.fullname" $root }}-trust-test
-          securityContext:
-            runAsNonRoot: true
-            seccompProfile:
-              type: RuntimeDefault
           containers:
             - name: trust-test
-              image: "{{ $root.Values.trustTest.image.repository }}:{{ $root.Values.trustTest.image.tag }}"
-              imagePullPolicy: {{ $root.Values.trustTest.image.pullPolicy | default "IfNotPresent" }}
+              image: {{ printf "%s:%s" (include "vpProxyCa.trustTestImageRepository" $root) (include "vpProxyCa.trustTestImageTag" $root) | quote }}
+              imagePullPolicy: {{ include "vpProxyCa.trustTestImagePullPolicy" $root }}
               command:
                 - /bin/bash
                 - /scripts/verify-cluster-trust.sh
               env:
+                - name: HOME
+                  value: /tmp
                 - name: CA_BUNDLE_PATH
                   value: {{ $caPath | quote }}
                 - name: CA_WAIT_SECONDS
@@ -148,13 +147,6 @@ spec:
                   value: {{ $root.Values.trustTest.targets | default list | toJson | quote }}
               resources:
                 {{- toYaml ($root.Values.trustTest.resources | default dict) | nindent 16 }}
-              securityContext:
-                allowPrivilegeEscalation: false
-                readOnlyRootFilesystem: true
-                runAsNonRoot: true
-                capabilities:
-                  drop:
-                    - ALL
               volumeMounts:
                 - name: trust-script
                   mountPath: /scripts

@@ -519,8 +519,8 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | trustTest.enabled | bool | `false` | When true, render trust-test CronJobs in trustTest.namespaces (requires non-empty list). |
 | trustTest.failedJobsHistoryLimit | int | `3` |  |
 | trustTest.image.pullPolicy | string | `"IfNotPresent"` |  |
-| trustTest.image.repository | string | `"registry.access.redhat.com/ubi9/ubi"` |  |
-| trustTest.image.tag | string | `"9.6"` |  |
+| trustTest.image.repository | string | `"registry.redhat.io/openshift4/ose-cli"` | ose-cli includes oc and curl; avoids setgroups errors from root-based imperative-container. |
+| trustTest.image.tag | string | `"latest"` |  |
 | trustTest.includeLocalCluster | bool | `true` |  |
 | trustTest.namespaces | list | `[]` | Namespaces to install the tester (label with cluster-ca.vp.io/trust-bundle-target for labeled Bundle). Each entry may be a string namespace name or an object with name, optional route, optional caBundle.configMapName. |
 | trustTest.requireRemoteReachable | bool | `false` | When false, unreachable remote endpoints log a warning instead of failing the job. |

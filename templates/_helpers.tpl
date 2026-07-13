@@ -183,6 +183,21 @@ argocd.argoproj.io/sync-wave: {{ $wave | quote }}
 {{- end }}
 
 {{/*
+Image for trust-test CronJobs. Defaults to ose-cli (includes oc and curl).
+*/}}
+{{- define "vpProxyCa.trustTestImageRepository" -}}
+{{- .Values.trustTest.image.repository | default "registry.redhat.io/openshift4/ose-cli" -}}
+{{- end }}
+
+{{- define "vpProxyCa.trustTestImageTag" -}}
+{{- .Values.trustTest.image.tag | default "latest" -}}
+{{- end }}
+
+{{- define "vpProxyCa.trustTestImagePullPolicy" -}}
+{{- .Values.trustTest.image.pullPolicy | default .Values.image.pullPolicy -}}
+{{- end }}
+
+{{/*
 trustTest.namespaces entry: string name or { name, route?, caBundle? }.
 */}}
 {{- define "vpProxyCa.trustTestNamespaceName" -}}

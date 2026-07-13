@@ -74,6 +74,18 @@ tests:
           path: spec.jobTemplate.spec.template.spec.volumes[1].configMap.name
           value: vp-pattern-proxy-ca-bundle-labeled
 
+  - it: renders trust-test CronJob with ose-cli image
+    set:
+      trustTest:
+        enabled: true
+        namespaces:
+          - config-demo
+    documentIndex: 4
+    asserts:
+      - matchRegex:
+          path: spec.jobTemplate.spec.template.spec.containers[0].image
+          pattern: "^registry\\.redhat\\.io/openshift4/ose-cli:"
+
   - it: honors per-namespace route overrides
     set:
       trustTest:

@@ -187,8 +187,9 @@ trustTest:
   # -- When false, unreachable remote endpoints log a warning instead of failing the job.
   requireRemoteReachable: false
   image:
-    repository: registry.access.redhat.com/ubi9/ubi
-    tag: "9.6"
+    # -- ose-cli includes oc and curl; avoids setgroups errors from root-based imperative-container.
+    repository: registry.redhat.io/openshift4/ose-cli
+    tag: latest
     pullPolicy: IfNotPresent
   caBundle:
     # -- Empty: labeled Bundle ConfigMap name when labeledBundle.enabled, else configMapName.
