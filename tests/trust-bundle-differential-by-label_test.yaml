@@ -1,0 +1,72 @@
+suite: trust bundle differential by label
+templates:
+  - trust-bundle-differential-by-label.yaml
+release:
+  name: testrel
+tests:
+  - it: does not render when differentialBundle is disabled
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: does not render when trustManager is disabled
+    set:
+      trustManager.enabled: false
+      trustManager.differentialBundle.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: does not render when byLabelBundle is disabled
+    set:
+      trustManager.differentialBundle.enabled: true
+      trustManager.differentialBundle.byLabelBundle.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: renders by-label differential Bundle with default namespaceSelector and cabundle key
+    set:
+      trustManager.differentialBundle.enabled: true
+    asserts:
+      - isKind:
+          of: Bundle
+      - equal:
+          path: metadata.name
+          value: vp-pattern-proxy-ca-bundle-differential-by-label
+      - equal:
+          path: metadata.labels["app.kubernetes.io/component"]
+          value: trust-bundle-differential-by-label
+      - equal:
+          path: spec.target.namespaceSelector.matchLabels["cluster-ca.vp.io/differential-ca-target"]
+          value: "true"
+      - notExists:
+          path: spec.sources[0].useDefaultCAs
+      - equal:
+          path: spec.sources[0].secret.includeAllKeys
+          value: true
+      - equal:
+          path: spec.target.configMap.key
+          value: cabundle
+      - notExists:
+          path: spec.target.namespaceSelector.matchExpressions
+  - it: honors custom by-label name, target key, and namespaceSelector
+    set:
+      trustManager.differentialBundle.enabled: true
+      trustManager.differentialBundle.byLabelBundle.name: my-diff-workload-ca
+      trustManager.differentialBundle.byLabelBundle.targetKey: private_ca
+      trustManager.differentialBundle.byLabelBundle.namespaceSelector.matchLabels.app\.io/need-diff-ca: "true"
+    asserts:
+      - equal:
+          path: metadata.name
+          value: my-diff-workload-ca
+      - equal:
+          path: spec.target.configMap.key
+          value: private_ca
+      - equal:
+          path: spec.target.namespaceSelector.matchLabels["app.io/need-diff-ca"]
+          value: "true"
+  - it: fails when byLabel targetKey contains a dot
+    set:
+      trustManager.differentialBundle.enabled: true
+      trustManager.differentialBundle.byLabelBundle.targetKey: ca.bundle
+    asserts:
+      - failedTemplate:
+          errorMessage: 'trustManager.differentialBundle.byLabelBundle.targetKey "ca.bundle" must not contain ''.'''

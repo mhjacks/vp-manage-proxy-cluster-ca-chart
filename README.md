@@ -29,6 +29,8 @@ Prerequisites on each cluster:
 |--------|--------|--------------------------------|
 | **by-namespace-name** (default) | **`trustManager.byNamespaceNameBundle`** | **`configMapName`** in namespaces listed in **`byNamespaceNameBundle.namespaces`** (defaults to **`[targetNamespace]`**, **`openshift-config`**) |
 | **by-label** (optional) | **`trustManager.byLabelBundle.enabled: true`** | **`<configMapName>-by-label`** (or **`byLabelBundle.name`**) in namespaces matching **`byLabelBundle.namespaceSelector`** |
+| **differential by-namespace-name** | **`trustManager.differentialBundle`** + **`byNamespaceNameBundle`** | **`<configMapName>-differential`** (or **`differentialBundle.name`**) — private/export CAs only, key **`cabundle`** (no dots) |
+| **differential by-label** | **`trustManager.differentialBundle.byLabelBundle`** | **`<configMapName>-differential-by-label`** in namespaces matching **`cluster-ca.vp.io/differential-ca-target: "true"`** |
 
 Use **by-label** for namespaces you create yourself in the pattern GitOps (label them with **`cluster-ca.vp.io/trust-bundle-target: "true"`**). Use **by-namespace-name** for OpenShift system namespaces such as **`openshift-config`** that you cannot label — list them explicitly under **`byNamespaceNameBundle.namespaces`**. This chart does not manage **Namespace** objects.
 
@@ -47,6 +49,35 @@ trustManager:
 ```
 
 Label workload namespaces with **`cluster-ca.vp.io/trust-bundle-target: "true"`**. They receive **`ConfigMap/<configMapName>-by-label`** with the same **`ca-bundle.crt`** PEM as **`openshift-config`**.
+
+### Differential CA Bundle (no system trust store)
+
+When **`trustManager.differentialBundle.enabled`** is **true**, the chart renders additional **Bundle**(s) that merge the same export / hub-export **Secrets** (and optionally **`additionalCaBundles`**) **without** **`useDefaultCAs`**. The result is only the differential CA material outside the platform trust store — suitable for apps that need private cluster CAs without replacing or duplicating the full system CA package.
+
+| Property | Value |
+|----------|-------|
+| **Proxy / system trust** | Not used — **`Proxy/cluster.trustedCA`** still points at the primary **`configMapName`** bundle only |
+| **ConfigMap data key** | **`cabundle`** by default (**`differentialBundle.targetKey`**); must not contain **`.`** |
+| **by-namespace-name** | Explicit names under **`differentialBundle.byNamespaceNameBundle.namespaces`** (defaults to **`[targetNamespace]`**) |
+| **by-label** | Label **`cluster-ca.vp.io/differential-ca-target: "true"`** (distinct from the full trust-bundle label) |
+
+Example:
+
+```yaml
+trustManager:
+  differentialBundle:
+    enabled: true
+    byNamespaceNameBundle:
+      namespaces:
+        - my-app
+    byLabelBundle:
+      enabled: true
+      namespaceSelector:
+        matchLabels:
+          cluster-ca.vp.io/differential-ca-target: "true"
+```
+
+Mount **`ConfigMap.data.cabundle`** (not **`ca-bundle.crt`**) in workloads that need only the differential PEMs.
 
 Default **`trustManager.bundle.sources`**:
 
@@ -156,7 +187,7 @@ spec:
 
 ### Injecting extra CA material (`additionalCaBundles`)
 
-With **`trustManager.enabled`** (default), the merged **Proxy** **ConfigMap** is:
+When **`trustManager.enabled`** (default), the merged **Proxy** **ConfigMap** is:
 
 **`useDefaultCAs`** (platform trust store) + cluster export/hub-export **Secrets** + **`additionalCaBundles`** (**`inLine`**).
 
@@ -166,23 +197,31 @@ With **`trustManager.enabled`** (default), the merged **Proxy** **ConfigMap** is
 | Export / hub-export **Secrets** | **Bundle** | Per-cluster API/ingress CAs |
 | **`additionalCaBundles`** | **Bundle** **`inLine`** | Your extra PEMs, additive to the above |
 
+The optional **differential** **Bundle** (**`trustManager.differentialBundle`**) merges export / hub-export (and **`additionalCaBundles`** when **`includeAdditionalCaBundles`** is true) **without** **`useDefaultCAs`**, into a separate **ConfigMap** key (**`cabundle`**). It is never referenced by **`Proxy/cluster.trustedCA`**.
+
 When **`trustManager.enabled`** is **false**, the hub job merges **`additionalCaBundles`** with hub CAs before writing **`configMapName`** (no **Bundle**).
 
 ### Optional TLS trust verification (`trustTest`)
 
 When **`trustTest.enabled`** is **true** and **`trustTest.namespaces`** lists one or more namespaces, the chart renders a **CronJob** in each namespace that:
 
-1. Mounts the merged CA bundle **`ConfigMap`** (default: by-label Bundle name **`<configMapName>-by-label`** when **`trustManager.byLabelBundle.enabled`**).
+1. Mounts the merged CA bundle **`ConfigMap`** (default: **`configMapName`**, the same **`ConfigMap`** written by **by-namespace-name** / **Proxy** — list the namespace under **`trustManager.byNamespaceNameBundle.namespaces`**). Set **`trustTest.caBundle.configMapName`** to the by-label Bundle name only when using labeled distribution.
 2. Waits until **`ca-bundle.crt`** is non-empty.
 3. Runs **`curl --cacert`** against discovered or configured **API** (`https://api.<cluster>.<base>:6443/readyz`, no **`apps.`** segment) and **ingress** endpoints on the cluster **`apps.<cluster>.<base>`** domain for the local cluster, hub, clusters listed as keys in the ESO import **Secret** (**`pushsecrets/cluster-ca`** properties), and ACM **ManagedClusters** (when present). The default ingress check is the **OpenShift console** (`console-openshift-console.<apps-domain>`); on the local cluster the **`console`** **Route** in **`openshift-console`** is used when discoverable.
 
-Target namespaces must receive the by-label Bundle (label with **`cluster-ca.vp.io/trust-bundle-target: "true"`**). Example:
+Target namespaces must receive **`configMapName`** (via **`byNamespaceNameBundle.namespaces`**) or set an explicit **`caBundle.configMapName`**. Example:
 
 ```yaml
+trustManager:
+  byNamespaceNameBundle:
+    enabled: true
+    namespaces:
+      - openshift-config
+      - openshift-adp
 trustTest:
   enabled: true
   namespaces:
-    - config-demo
+    - openshift-adp
   ingress:
     console:
       enabled: true
@@ -304,6 +343,7 @@ applications:
 | `hubCluster` | **true** on hub (default when domains match); **false** on spokes. Gates hub **CronJob**. |
 | `configMapName` | **Proxy** **`trustedCA`** **ConfigMap** name (and **Bundle** name when **`trustManager.enabled`**). |
 | `trustManager.*` | **Bundle**, trust namespace, label contract, **`spec.sources`**. |
+| `trustManager.differentialBundle.*` | Optional **Bundle**(s) with private/export CAs only (**no** **`useDefaultCAs`**), key **`cabundle`**. |
 | `eso.export.*` | Export namespace, **CronJob** schedule, **PushSecret** local **Secret**, Vault property. |
 | `eso.externalSecret.*` | Vault import into trust namespace on every cluster. |
 | `eso.hubExport.secretName` | Hub-only **Secret** written by hub **CronJob** (`hub-export` label). |
@@ -504,6 +544,14 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 | trustManager.byLabelBundle | object | `{"argoCDSyncWave":7,"enabled":true,"name":"","namespaceSelector":{"matchLabels":{"cluster-ca.vp.io/trust-bundle-target":"true"}},"targetKey":""}` | by-label Bundle: same sources/target key as by-namespace-name, namespaceSelector matchLabels. Use for workload namespaces you create and label in the pattern GitOps. |
 | trustManager.byNamespaceNameBundle | object | `{"argoCDSyncWave":7,"enabled":true,"namespaces":[]}` | by-namespace-name Bundle: injects configMapName into explicit OpenShift system namespaces. Use for openshift-config and other platform namespaces you cannot label in GitOps. |
 | trustManager.byNamespaceNameBundle.namespaces | list | `[]` | Namespace names (defaults to [targetNamespace] when empty). |
+| trustManager.differentialBundle | object | `{"argoCDSyncWave":7,"byLabelBundle":{"argoCDSyncWave":7,"enabled":true,"name":"","namespaceSelector":{"matchLabels":{"cluster-ca.vp.io/differential-ca-target":"true"}},"targetKey":""},"byNamespaceNameBundle":{"argoCDSyncWave":7,"enabled":true,"namespaces":[]},"enabled":false,"includeAdditionalCaBundles":true,"name":"","sources":[],"targetKey":"cabundle"}` | Differential CA Bundle: export/hub-export (+ additionalCaBundles) only — no useDefaultCAs / platform trust store. Not wired to Proxy/cluster.trustedCA. ConfigMap key has no dots (YAML-safe). |
+| trustManager.differentialBundle.byLabelBundle | object | `{"argoCDSyncWave":7,"enabled":true,"name":"","namespaceSelector":{"matchLabels":{"cluster-ca.vp.io/differential-ca-target":"true"}},"targetKey":""}` | by-label differential Bundle (namespaceSelector). Distinct label from the full trust bundle. |
+| trustManager.differentialBundle.byNamespaceNameBundle | object | `{"argoCDSyncWave":7,"enabled":true,"namespaces":[]}` | by-namespace-name differential Bundle (explicit namespace names). |
+| trustManager.differentialBundle.byNamespaceNameBundle.namespaces | list | `[]` | Namespace names (defaults to [targetNamespace] when empty). |
+| trustManager.differentialBundle.includeAdditionalCaBundles | bool | `true` | When true, append additionalCaBundles as inLine sources. |
+| trustManager.differentialBundle.name | string | `""` | Bundle/ConfigMap name (defaults to <trustBundleName>-differential). |
+| trustManager.differentialBundle.sources | list | `[]` | Optional override of Bundle sources. Empty: reuse trustManager.bundle.sources (without useDefaultCAs). |
+| trustManager.differentialBundle.targetKey | string | `"cabundle"` | ConfigMap data key (must not contain '.'). |
 | trustManager.enabled | bool | `true` | When true, render trust.cert-manager.io/v1alpha1 Bundle and write merged PEM to the trust source ConfigMap. |
 | trustManager.labels.clusterGroup | string | `"cluster-ca.vp.io/cluster-group"` |  |
 | trustManager.labels.component | string | `"cluster-ca.vp.io/component"` |  |

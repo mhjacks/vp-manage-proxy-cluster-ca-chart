@@ -34,6 +34,8 @@ Prerequisites on each cluster:
 |--------|--------|--------------------------------|
 | **by-namespace-name** (default) | **`trustManager.byNamespaceNameBundle`** | **`configMapName`** in namespaces listed in **`byNamespaceNameBundle.namespaces`** (defaults to **`[targetNamespace]`**, **`openshift-config`**) |
 | **by-label** (optional) | **`trustManager.byLabelBundle.enabled: true`** | **`<configMapName>-by-label`** (or **`byLabelBundle.name`**) in namespaces matching **`byLabelBundle.namespaceSelector`** |
+| **differential by-namespace-name** | **`trustManager.differentialBundle`** + **`byNamespaceNameBundle`** | **`<configMapName>-differential`** (or **`differentialBundle.name`**) — private/export CAs only, key **`cabundle`** (no dots) |
+| **differential by-label** | **`trustManager.differentialBundle.byLabelBundle`** | **`<configMapName>-differential-by-label`** in namespaces matching **`cluster-ca.vp.io/differential-ca-target: "true"`** |
 
 Use **by-label** for namespaces you create yourself in the pattern GitOps (label them with **`cluster-ca.vp.io/trust-bundle-target: "true"`**). Use **by-namespace-name** for OpenShift system namespaces such as **`openshift-config`** that you cannot label — list them explicitly under **`byNamespaceNameBundle.namespaces`**. This chart does not manage **Namespace** objects.
 
@@ -52,6 +54,35 @@ trustManager:
 ```
 
 Label workload namespaces with **`cluster-ca.vp.io/trust-bundle-target: "true"`**. They receive **`ConfigMap/<configMapName>-by-label`** with the same **`ca-bundle.crt`** PEM as **`openshift-config`**.
+
+### Differential CA Bundle (no system trust store)
+
+When **`trustManager.differentialBundle.enabled`** is **true**, the chart renders additional **Bundle**(s) that merge the same export / hub-export **Secrets** (and optionally **`additionalCaBundles`**) **without** **`useDefaultCAs`**. The result is only the differential CA material outside the platform trust store — suitable for apps that need private cluster CAs without replacing or duplicating the full system CA package.
+
+| Property | Value |
+|----------|-------|
+| **Proxy / system trust** | Not used — **`Proxy/cluster.trustedCA`** still points at the primary **`configMapName`** bundle only |
+| **ConfigMap data key** | **`cabundle`** by default (**`differentialBundle.targetKey`**); must not contain **`.`** |
+| **by-namespace-name** | Explicit names under **`differentialBundle.byNamespaceNameBundle.namespaces`** (defaults to **`[targetNamespace]`**) |
+| **by-label** | Label **`cluster-ca.vp.io/differential-ca-target: "true"`** (distinct from the full trust-bundle label) |
+
+Example:
+
+```yaml
+trustManager:
+  differentialBundle:
+    enabled: true
+    byNamespaceNameBundle:
+      namespaces:
+        - my-app
+    byLabelBundle:
+      enabled: true
+      namespaceSelector:
+        matchLabels:
+          cluster-ca.vp.io/differential-ca-target: "true"
+```
+
+Mount **`ConfigMap.data.cabundle`** (not **`ca-bundle.crt`**) in workloads that need only the differential PEMs.
 
 Default **`trustManager.bundle.sources`**:
 
@@ -161,7 +192,7 @@ spec:
 
 ### Injecting extra CA material (`additionalCaBundles`)
 
-With **`trustManager.enabled`** (default), the merged **Proxy** **ConfigMap** is:
+When **`trustManager.enabled`** (default), the merged **Proxy** **ConfigMap** is:
 
 **`useDefaultCAs`** (platform trust store) + cluster export/hub-export **Secrets** + **`additionalCaBundles`** (**`inLine`**).
 
@@ -170,6 +201,8 @@ With **`trustManager.enabled`** (default), the merged **Proxy** **ConfigMap** is
 | **`trustManager.bundle.useDefaultCAs: true`** (default) | trust-manager **Bundle** | System/public CAs at Bundle merge time |
 | Export / hub-export **Secrets** | **Bundle** | Per-cluster API/ingress CAs |
 | **`additionalCaBundles`** | **Bundle** **`inLine`** | Your extra PEMs, additive to the above |
+
+The optional **differential** **Bundle** (**`trustManager.differentialBundle`**) merges export / hub-export (and **`additionalCaBundles`** when **`includeAdditionalCaBundles`** is true) **without** **`useDefaultCAs`**, into a separate **ConfigMap** key (**`cabundle`**). It is never referenced by **`Proxy/cluster.trustedCA`**.
 
 When **`trustManager.enabled`** is **false**, the hub job merges **`additionalCaBundles`** with hub CAs before writing **`configMapName`** (no **Bundle**).
 
@@ -315,6 +348,7 @@ applications:
 | `hubCluster` | **true** on hub (default when domains match); **false** on spokes. Gates hub **CronJob**. |
 | `configMapName` | **Proxy** **`trustedCA`** **ConfigMap** name (and **Bundle** name when **`trustManager.enabled`**). |
 | `trustManager.*` | **Bundle**, trust namespace, label contract, **`spec.sources`**. |
+| `trustManager.differentialBundle.*` | Optional **Bundle**(s) with private/export CAs only (**no** **`useDefaultCAs`**), key **`cabundle`**. |
 | `eso.export.*` | Export namespace, **CronJob** schedule, **PushSecret** local **Secret**, Vault property. |
 | `eso.externalSecret.*` | Vault import into trust namespace on every cluster. |
 | `eso.hubExport.secretName` | Hub-only **Secret** written by hub **CronJob** (`hub-export` label). |

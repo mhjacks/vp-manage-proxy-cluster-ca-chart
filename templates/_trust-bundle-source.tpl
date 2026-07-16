@@ -70,3 +70,29 @@ useDefaultCAs adds the platform default CA package at Bundle merge time (keeps e
 {{ include "vpProxyCa.trustBundleSourceItem" (dict "inLine" .) }}
 {{- end }}
 {{- end }}
+
+{{/*
+Differential Bundle sources: export/hub-export (and optional additionalCaBundles) without useDefaultCAs.
+Uses trustManager.differentialBundle.sources when set; otherwise trustManager.bundle.sources.
+*/}}
+{{- define "vpProxyCa.differentialTrustBundleSources" }}
+{{- $root := . }}
+{{- $diff := .Values.trustManager.differentialBundle | default dict }}
+{{- $bundle := .Values.trustManager.bundle | default dict }}
+{{- $sources := $diff.sources | default list }}
+{{- if eq (len $sources) 0 }}
+{{- $sources = $bundle.sources | default list }}
+{{- end }}
+{{- if eq (len $sources) 0 }}
+{{- fail "trustManager.differentialBundle requires sources (set differentialBundle.sources or trustManager.bundle.sources)" }}
+{{- end }}
+{{- range $sources }}
+{{ include "vpProxyCa.trustBundleSourceItem" . }}
+{{- end }}
+{{- /* includeAdditionalCaBundles defaults to true when unset */ -}}
+{{- if ne ($diff.includeAdditionalCaBundles | toString) "false" }}
+{{- range $root.Values.additionalCaBundles }}
+{{ include "vpProxyCa.trustBundleSourceItem" (dict "inLine" .) }}
+{{- end }}
+{{- end }}
+{{- end }}

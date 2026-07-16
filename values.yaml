@@ -83,6 +83,34 @@ trustManager:
     namespaceSelector:
       matchLabels:
         cluster-ca.vp.io/trust-bundle-target: "true"
+  # -- Differential CA Bundle: export/hub-export (+ additionalCaBundles) only — no useDefaultCAs /
+  # platform trust store. Not wired to Proxy/cluster.trustedCA. ConfigMap key has no dots (YAML-safe).
+  differentialBundle:
+    enabled: false
+    # -- Bundle/ConfigMap name (defaults to <trustBundleName>-differential).
+    name: ""
+    # -- ConfigMap data key (must not contain '.').
+    targetKey: cabundle
+    argoCDSyncWave: 7
+    # -- Optional override of Bundle sources. Empty: reuse trustManager.bundle.sources (without useDefaultCAs).
+    sources: []
+    # -- When true, append additionalCaBundles as inLine sources.
+    includeAdditionalCaBundles: true
+    # -- by-namespace-name differential Bundle (explicit namespace names).
+    byNamespaceNameBundle:
+      enabled: true
+      argoCDSyncWave: 7
+      # -- Namespace names (defaults to [targetNamespace] when empty).
+      namespaces: []
+    # -- by-label differential Bundle (namespaceSelector). Distinct label from the full trust bundle.
+    byLabelBundle:
+      enabled: true
+      name: ""
+      argoCDSyncWave: 7
+      targetKey: ""
+      namespaceSelector:
+        matchLabels:
+          cluster-ca.vp.io/differential-ca-target: "true"
 
 serviceAccount:
   create: true
