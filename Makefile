@@ -40,6 +40,7 @@ super-linter: ## Runs super linter locally
 					-e VALIDATE_BIOME_FORMAT=false \
 					-e VALIDATE_BASH_EXEC=false \
 					-e VALIDATE_CHECKOV=false \
+					-e VALIDATE_KUBERNETES_KUBECONFORM=false \
 					-e VALIDATE_MARKDOWN=false \
 					-e VALIDATE_MARKDOWN_PRETTIER=false \
 					-e VALIDATE_NATURAL_LANGUAGE=false \

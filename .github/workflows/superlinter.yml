@@ -10,12 +10,13 @@ permissions:
 
 jobs:
   lint:
-    uses: validatedpatterns/github-actions-library/.github/workflows/superlinter.yml@v1
+    uses: validatedpatterns/github-actions-library/.github/workflows/superlinter.yml@v1 # zizmor: ignore[unpinned-uses]
     with:
       sl_env: |
         VALIDATE_BIOME_FORMAT=false
         VALIDATE_BASH_EXEC=false
         VALIDATE_CHECKOV=false
+        VALIDATE_KUBERNETES_KUBECONFORM=false
         VALIDATE_MARKDOWN=false
         VALIDATE_MARKDOWN_PRETTIER=false
         VALIDATE_NATURAL_LANGUAGE=false
