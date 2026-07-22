@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs on the spoke: merge API server CA, optional ingress CA, optional system trust; push to hub (no kubeconfig).
+# Runs on the spoke: merge API server CA, optional ingress CA; update local export Secret.
 set -euo pipefail
 : >/tmp/trust.crt
 if [[ "${INCLUDE_API_CA:-true}" == "true" ]]; then
@@ -12,19 +12,20 @@ if [[ "${INCLUDE_API_CA:-true}" == "true" ]]; then
     printf '\n' >>/tmp/trust.crt
   fi
 fi
-if [[ "${INCLUDE_SYSTEM_TRUST_STORE:-false}" == "true" ]]; then
-  oc get configmap trusted-ca-bundle -n openshift-config-managed \
-    -o jsonpath='{.data.ca-bundle\.crt}' >>/tmp/trust.crt || true
-  printf '\n' >>/tmp/trust.crt
-fi
 if [[ "${INCLUDE_INGRESS_CA}" == "true" ]]; then
   oc get secret router-ca -n openshift-ingress-operator -o jsonpath='{.data.tls\.crt}' 2>/dev/null | base64 -d >>/tmp/trust.crt || true
   oc get secret router-ca -n openshift-ingress-operator -o jsonpath='{.data.ca\.crt}' 2>/dev/null | base64 -d >>/tmp/trust.crt || true
   printf '\n' >>/tmp/trust.crt
 fi
-HUB_OC=(oc --server="$(cat /hub-api/server)" --token="$(cat /hub-api/token)" --certificate-authority=/hub-api/ca.crt)
-"${HUB_OC[@]}" create configmap "bundle-${CLUSTER_NAME}" -n "${HUB_NAMESPACE}" \
-  --from-file=ca-bundle.crt=/tmp/trust.crt -o yaml --dry-run=client | "${HUB_OC[@]}" apply -f -
-"${HUB_OC[@]}" label configmap "bundle-${CLUSTER_NAME}" -n "${HUB_NAMESPACE}" \
-  app.kubernetes.io/name=vp-proxy-ca-spoke-bundle \
-  app.kubernetes.io/instance="${CLUSTER_NAME}" --overwrite
+if [[ ! -s /tmp/trust.crt ]]; then
+  echo "no CA material collected for export" >&2
+  exit 1
+fi
+oc create secret generic "${EXPORT_SECRET_NAME}" -n "${EXPORT_NAMESPACE}" \
+  --from-file="${EXPORT_SECRET_KEY}=/tmp/trust.crt" \
+  --dry-run=client -o yaml | oc apply -f -
+oc label secret "${EXPORT_SECRET_NAME}" -n "${EXPORT_NAMESPACE}" \
+  app.kubernetes.io/name=vp-proxy-ca-eso-export \
+  app.kubernetes.io/instance="${CLUSTER_NAME}" \
+  app.kubernetes.io/component=export-source \
+  --overwrite

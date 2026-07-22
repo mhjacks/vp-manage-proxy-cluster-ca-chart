@@ -4,20 +4,22 @@ templates:
 release:
   name: testrel
 tests:
-  - it: renders CronJob when enabled
+  - it: renders hub CronJob when enabled on hub cluster
+    set:
+      hubCluster: true
     asserts:
       - isKind:
           of: CronJob
       - equal:
           path: metadata.namespace
-          value: openshift-config
+          value: vp-manage-proxy-cluster-ca
       - matchRegex:
           path: spec.jobTemplate.spec.template.spec.containers[0].image
           pattern: "^quay.io/validatedpatterns/imperative-container:"
       - contains:
           path: spec.jobTemplate.spec.template.spec.containers[0].env
           content:
-            name: ACM_ENABLED
+            name: WRITE_HUB_EXPORT
             value: "true"
       - contains:
           path: spec.jobTemplate.spec.template.spec.containers[0].env
@@ -32,44 +34,34 @@ tests:
       - contains:
           path: spec.jobTemplate.spec.template.spec.containers[0].env
           content:
-            name: INCLUDE_SYSTEM_TRUST_STORE
-            value: "false"
-      - contains:
-          path: spec.jobTemplate.spec.template.spec.containers[0].env
-          content:
-            name: MANIFESTWORK_GRANT_KLUSTERLET_PROXY_RBAC
+            name: TRUST_MANAGER_ENABLED
             value: "true"
       - contains:
           path: spec.jobTemplate.spec.template.spec.containers[0].env
           content:
-            name: KLUSTERLET_WORK_SA_NAMESPACE
-            value: open-cluster-management-agent
-      - contains:
-          path: spec.jobTemplate.spec.template.spec.containers[0].env
-          content:
-            name: KLUSTERLET_WORK_SA_NAME
-            value: klusterlet-work-sa
-  - it: sets ACM_ENABLED false for hub-only mode
+            name: TRUST_NAMESPACE
+            value: cert-manager
+  - it: does not render hub CronJob on spoke cluster
     set:
-      acm.enabled: false
+      hubCluster: false
+      cronJob:
+        enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: disables trust manager env when configured off
+    set:
+      hubCluster: true
+      trustManager.enabled: false
     asserts:
       - contains:
           path: spec.jobTemplate.spec.template.spec.containers[0].env
           content:
-            name: ACM_ENABLED
-            value: "false"
-      - contains:
-          path: spec.jobTemplate.spec.template.spec.containers[0].env
-          content:
-            name: INCLUDE_API_CA
-            value: "true"
-      - contains:
-          path: spec.jobTemplate.spec.template.spec.containers[0].env
-          content:
-            name: INCLUDE_SYSTEM_TRUST_STORE
+            name: TRUST_MANAGER_ENABLED
             value: "false"
   - it: allows includeApiCA to be disabled explicitly
     set:
+      hubCluster: true
       includeApiCA: false
     asserts:
       - contains:
@@ -77,35 +69,9 @@ tests:
           content:
             name: INCLUDE_API_CA
             value: "false"
-  - it: allows includeIngressCA to be disabled explicitly
-    set:
-      includeIngressCA: false
-    asserts:
-      - contains:
-          path: spec.jobTemplate.spec.template.spec.containers[0].env
-          content:
-            name: INCLUDE_INGRESS_CA
-            value: "false"
-  - it: allows includeSystemTrustStore to be enabled explicitly
-    set:
-      includeSystemTrustStore: true
-    asserts:
-      - contains:
-          path: spec.jobTemplate.spec.template.spec.containers[0].env
-          content:
-            name: INCLUDE_SYSTEM_TRUST_STORE
-            value: "true"
-  - it: allows grantKlusterletProxyPatchRBAC to be disabled
-    set:
-      manifestWork.grantKlusterletProxyPatchRBAC: false
-    asserts:
-      - contains:
-          path: spec.jobTemplate.spec.template.spec.containers[0].env
-          content:
-            name: MANIFESTWORK_GRANT_KLUSTERLET_PROXY_RBAC
-            value: "false"
   - it: mounts extra material when additionalCaBundles are provided
     set:
+      hubCluster: true
       additionalCaBundles:
         - "TESTCERT"
     asserts:
@@ -120,9 +86,3 @@ tests:
             name: additional-ca
             mountPath: /extra
             readOnly: true
-      - contains:
-          path: spec.jobTemplate.spec.template.spec.volumes
-          content:
-            name: additional-ca
-            secret:
-              secretName: testrel-vp-manage-proxy-cluster-ca-additional-ca

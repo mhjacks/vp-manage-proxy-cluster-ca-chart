@@ -1,22 +1,22 @@
-{{- if .Values.syncJob.enabled }}
+{{- if and .Values.eso.export.enabled .Values.eso.export.syncJob.enabled }}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "vpProxyCa.fullname" . }}-sync
-  namespace: {{ .Values.namespace }}
+  name: {{ include "vpProxyCa.fullname" . }}-export
+  namespace: {{ include "vpProxyCa.esoExportNamespace" . }}
   labels:
     app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/component: sync-proxy-ca
+    app.kubernetes.io/component: eso-export
   annotations:
     argocd.argoproj.io/hook: Sync
-{{ include "vpProxyCa.syncJobSyncWaveAnnotations" . | nindent 4 }}
+    argocd.argoproj.io/sync-wave: {{ .Values.eso.export.syncJob.argoCDSyncWave | quote }}
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 3
-  activeDeadlineSeconds: 7200
+  activeDeadlineSeconds: 600
   template:
     metadata:
       labels:
@@ -25,13 +25,9 @@ spec:
     spec:
       restartPolicy: OnFailure
 {{- include "vpProxyCa.podHostUsers" . | nindent 6 }}
-      serviceAccountName: {{ include "vpProxyCa.serviceAccountName" . }}
-{{- with .Values.syncJob.podSecurityContext }}
-      securityContext:
-        {{- toYaml . | nindent 8 }}
-{{- end }}
+      serviceAccountName: {{ include "vpProxyCa.esoExportServiceAccountName" . }}
       containers:
-{{ include "vpProxyCa.syncJobContainer" . | trim | indent 8 }}
+{{ include "vpProxyCa.esoExportContainer" . | trim | indent 8 }}
       volumes:
-{{ include "vpProxyCa.gatherVolumes" . | trim | indent 8 }}
+{{ include "vpProxyCa.esoExportVolumes" . | trim | indent 8 }}
 {{- end }}

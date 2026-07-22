@@ -33,53 +33,215 @@ Service account name
 {{- end }}
 
 {{/*
-Stable ManifestWork object name (<=63 chars) for each managed cluster namespace.
+Hub vs spoke detection for VP GitOps (global.localClusterDomain vs global.hubClusterDomain).
+Override with hubCluster: true|false when auto-detection is unavailable.
 */}}
-{{- define "vpProxyCa.manifestWorkName" -}}
-{{- $base := .Values.manifestWork.nameOverride | default (printf "%s-proxy-ca" (include "vpProxyCa.fullname" .)) }}
-{{- $base | trunc 63 | trimSuffix "-" }}
+{{- define "vpProxyCa.isHubCluster" -}}
+{{- if eq (.Values.hubCluster | toString) "true" -}}
+true
+{{- else if eq (.Values.hubCluster | toString) "false" -}}
+false
+{{- else if eq ((.Values.clusterGroup | default dict).isHubCluster | toString) "true" -}}
+true
+{{- else if eq ((.Values.clusterGroup | default dict).isHubCluster | toString) "false" -}}
+false
+{{- else if and .Values.global .Values.global.localClusterDomain .Values.global.hubClusterDomain -}}
+{{- eq .Values.global.localClusterDomain .Values.global.hubClusterDomain | toString -}}
+{{- else -}}
+true
+{{- end -}}
 {{- end }}
 
-{{- define "vpProxyCa.manifestWorkProxyName" -}}
-{{- $base := .Values.manifestWork.proxyNameOverride | default (printf "%s-proxy-ca-proxy" (include "vpProxyCa.fullname" .)) }}
-{{- $base | trunc 63 | trimSuffix "-" }}
+{{- define "vpProxyCa.trustSourceConfigMapName" -}}
+{{- .Values.trustManager.sourceConfigMapName | default (printf "%s-sources" (include "vpProxyCa.fullname" .)) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{- define "vpProxyCa.manifestWorkPushAgentName" -}}
-{{- $base := .Values.spokePush.manifestWorkNameOverride | default (printf "%s-push-agent" (include "vpProxyCa.fullname" .)) }}
-{{- $base | trunc 63 | trimSuffix "-" }}
+{{- define "vpProxyCa.trustBundleName" -}}
+{{- .Values.trustManager.bundleName | default .Values.configMapName -}}
 {{- end }}
 
 {{/*
-Namespace for ACM Policy, PlacementBinding, Placement, and ManagedClusterSetBinding.
-When policy.placementRef.namespace is non-empty it overrides policy.hubNamespace so all
-policy placement objects stay in one workspace (PlacementBinding has no cross-namespace placementRef).
+Namespace for ESO export CronJob / PushSecret.
 */}}
-{{- define "vpProxyCa.policyWorkspaceNamespace" -}}
-{{- .Values.policy.placementRef.namespace | default .Values.policy.hubNamespace -}}
+{{- define "vpProxyCa.esoExportNamespace" -}}
+{{- .Values.eso.export.namespace | default "vp-proxy-ca-sync" -}}
 {{- end }}
 
 {{/*
-ACM Policy validating webhook: len(policyNamespace) + len(policy.metadata.name) <= 62.
-Default: vpca-<truncated Release.Name> to stay under the limit with long hub namespaces.
-Explicit policy.name: must satisfy the same constraint or template fails.
+ServiceAccount for ESO export CronJob.
 */}}
-{{- define "vpProxyCa.policyResourceName" -}}
-{{- $ns := include "vpProxyCa.policyWorkspaceNamespace" . }}
-{{- $max := sub 62 (len $ns) | int }}
-{{- $prefix := "vpca-" }}
-{{- $prefixLen := len $prefix }}
-{{- if lt $max (add $prefixLen 1) }}
-{{- fail (printf "ACM Policy requires len(namespace)+len(name)<=62; namespace %q leaves only %d chars for the policy name" $ns $max) }}
+{{- define "vpProxyCa.esoExportServiceAccountName" -}}
+{{- .Values.eso.export.serviceAccountName | default "vp-proxy-ca-exporter" -}}
 {{- end }}
-{{- $avail := sub $max $prefixLen | int }}
-{{- $defaultName := printf "%s%s" $prefix (.Release.Name | trunc $avail | trimSuffix "-") }}
-{{- if .Values.policy.name }}
-{{- if gt (add (len $ns) (len .Values.policy.name)) 62 }}
-{{- fail (printf "policy.name %q in namespace %q exceeds ACM limit (combined length must be <= 62); shorten policy.name or the policy workspace namespace" .Values.policy.name $ns) }}
+
+{{/*
+Vault property for PushSecret (cluster identity in pushsecrets/cluster-ca).
+*/}}
+{{- define "vpProxyCa.esoVaultProperty" -}}
+{{- if .Values.eso.export.vaultProperty -}}
+{{- .Values.eso.export.vaultProperty -}}
+{{- else if and .Values.global .Values.global.clusterDomain -}}
+{{- .Values.global.clusterDomain -}}
+{{- else -}}
+{{- .Release.Name -}}
+{{- end -}}
 {{- end }}
-{{- .Values.policy.name }}
-{{- else }}
-{{- $defaultName }}
+
+{{/*
+Shared Vault remoteKey for PushSecret and ExternalSecret dataFrom.extract (relative to ClusterSecretStore mount).
+*/}}
+{{- define "vpProxyCa.esoVaultRemoteKey" -}}
+{{- .Values.eso.vault.remoteKey | default "pushsecrets/cluster-ca" -}}
 {{- end }}
+
+{{/*
+Vault KV path for ExternalSecret dataFrom.extract (relative to ClusterSecretStore mount, same as PushSecret remoteKey).
+Do not prefix with secret/data/ when the store path is already "secret" (KV v2).
+*/}}
+{{- define "vpProxyCa.esoVaultExtractKey" -}}
+{{- if .Values.eso.externalSecret.vaultKey -}}
+{{- .Values.eso.externalSecret.vaultKey -}}
+{{- else -}}
+{{- include "vpProxyCa.esoVaultRemoteKey" . -}}
+{{- end -}}
 {{- end }}
+
+{{/*
+ESO ClusterSecretStore name (eso.secretStore, root secretStore, global.secretStore.name, or vault-backend).
+Matches config-demo / clustergroup convention: secretStore.name at chart root.
+*/}}
+{{- define "vpProxyCa.esoSecretStoreName" -}}
+{{- if .Values.eso.secretStore.name -}}
+{{- .Values.eso.secretStore.name -}}
+{{- else if and .Values.secretStore .Values.secretStore.name -}}
+{{- .Values.secretStore.name -}}
+{{- else if and .Values.global .Values.global.secretStore .Values.global.secretStore.name -}}
+{{- .Values.global.secretStore.name -}}
+{{- else -}}
+vault-backend
+{{- end -}}
+{{- end }}
+
+{{/*
+ESO ClusterSecretStore kind.
+*/}}
+{{- define "vpProxyCa.esoSecretStoreKind" -}}
+{{- if .Values.eso.secretStore.kind -}}
+{{- .Values.eso.secretStore.kind -}}
+{{- else if and .Values.secretStore .Values.secretStore.kind -}}
+{{- .Values.secretStore.kind -}}
+{{- else -}}
+ClusterSecretStore
+{{- end -}}
+{{- end }}
+
+{{/*
+Argo CD sync-wave for ESO export infrastructure (namespace, CronJob, etc.).
+*/}}
+{{- define "vpProxyCa.esoExportSyncWaveAnnotations" -}}
+{{- $wave := .Values.eso.export.argoCDSyncWave | default 8 }}
+argocd.argoproj.io/sync-wave: {{ $wave | quote }}
+{{- end }}
+
+{{/*
+Argo CD sync-wave for ExternalSecret (after vault-backend and export Job).
+*/}}
+{{- define "vpProxyCa.esoExternalSecretSyncWaveAnnotations" -}}
+{{- $wave := .Values.eso.externalSecret.argoCDSyncWave | default .Values.eso.argoCDSyncWave | default 10 }}
+argocd.argoproj.io/sync-wave: {{ $wave | quote }}
+{{- end }}
+
+{{/*
+Argo CD sync-wave for PushSecret (after local export Secret exists).
+*/}}
+{{- define "vpProxyCa.esoPushSecretSyncWaveAnnotations" -}}
+{{- $wave := .Values.eso.pushSecret.argoCDSyncWave | default 11 }}
+argocd.argoproj.io/sync-wave: {{ $wave | quote }}
+{{- end }}
+
+{{/*
+Image for gather/sync Job (ose-cli by default; imperative-container optional via syncJob.image).
+*/}}
+{{- define "vpProxyCa.syncJobImageRepository" -}}
+{{- .Values.syncJob.image.repository | default "registry.redhat.io/openshift4/ose-cli" -}}
+{{- end }}
+
+{{- define "vpProxyCa.syncJobImageTag" -}}
+{{- .Values.syncJob.image.tag | default "latest" -}}
+{{- end }}
+
+{{- define "vpProxyCa.syncJobImagePullPolicy" -}}
+{{- .Values.syncJob.image.pullPolicy | default .Values.image.pullPolicy -}}
+{{- end }}
+
+{{/*
+Argo CD sync-wave for hub/spoke Proxy patch Job (after Bundle / ESO resources).
+*/}}
+{{- define "vpProxyCa.syncJobSyncWaveAnnotations" -}}
+{{- $wave := .Values.syncJob.argoCDSyncWave | default 12 }}
+argocd.argoproj.io/sync-wave: {{ $wave | quote }}
+{{- end }}
+
+{{/*
+Image for trust-test CronJobs. Defaults to ose-cli (includes oc and curl).
+*/}}
+{{- define "vpProxyCa.trustTestImageRepository" -}}
+{{- .Values.trustTest.image.repository | default "registry.redhat.io/openshift4/ose-cli" -}}
+{{- end }}
+
+{{- define "vpProxyCa.trustTestImageTag" -}}
+{{- .Values.trustTest.image.tag | default "latest" -}}
+{{- end }}
+
+{{- define "vpProxyCa.trustTestImagePullPolicy" -}}
+{{- .Values.trustTest.image.pullPolicy | default .Values.image.pullPolicy -}}
+{{- end }}
+
+{{/*
+trustTest.namespaces entry: string name or { name, additionalIngress?, caBundle? }.
+*/}}
+{{- define "vpProxyCa.trustTestNamespaceName" -}}
+{{- if kindIs "string" . -}}
+{{- . -}}
+{{- else -}}
+{{- .name -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+ConfigMap name for the mounted CA bundle in a trustTest namespace.
+Defaults to configMapName (by-namespace-name / Proxy bundle). Set trustTest.caBundle.configMapName
+or per-namespace caBundle.configMapName to mount the by-label Bundle instead.
+*/}}
+{{- define "vpProxyCa.trustTestCaBundleConfigMapName" -}}
+{{- $root := index . 0 -}}
+{{- $entry := index . 1 -}}
+{{- if and (not (kindIs "string" $entry)) $entry.caBundle $entry.caBundle.configMapName -}}
+{{- $entry.caBundle.configMapName -}}
+{{- else if $root.Values.trustTest.caBundle.configMapName -}}
+{{- $root.Values.trustTest.caBundle.configMapName -}}
+{{- else -}}
+{{- $root.Values.configMapName -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Merged global + per-namespace additional ingress checks for trust-test CronJob env JSON.
+Always returns a JSON array (defaults to []).
+*/}}
+{{- define "vpProxyCa.trustTestAdditionalIngressJson" -}}
+{{- $root := index . 0 -}}
+{{- $entry := index . 1 -}}
+{{- $ingress := $root.Values.trustTest.ingress | default dict -}}
+{{- $global := $ingress.additional | default list -}}
+{{- $local := list -}}
+{{- if and (not (kindIs "string" $entry)) $entry.additionalIngress -}}
+{{- $local = $entry.additionalIngress | default list -}}
+{{- end -}}
+{{- $merged := concat ($global | default list) ($local | default list) -}}
+{{- if gt (len $merged) 0 -}}
+{{- $merged | toJson -}}
+{{- else -}}
+[]
+{{- end -}}
+{{- end -}}

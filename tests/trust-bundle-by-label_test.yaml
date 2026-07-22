@@ -1,0 +1,58 @@
+suite: trust bundle by label
+templates:
+  - trust-bundle-by-label.yaml
+release:
+  name: testrel
+tests:
+  - it: does not render when byLabelBundle is disabled
+    set:
+      trustManager.byLabelBundle.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: does not render when trustManager is disabled
+    set:
+      trustManager.enabled: false
+      trustManager.byLabelBundle.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: renders by-label Bundle with configurable namespaceSelector
+    set:
+      trustManager.byLabelBundle.enabled: true
+      trustManager.byLabelBundle.namespaceSelector.matchLabels.cluster-ca\.vp\.io/trust-bundle-target: "true"
+    asserts:
+      - isKind:
+          of: Bundle
+      - equal:
+          path: metadata.name
+          value: vp-pattern-proxy-ca-bundle-by-label
+      - equal:
+          path: metadata.labels["app.kubernetes.io/component"]
+          value: trust-bundle-by-label
+      - equal:
+          path: spec.target.namespaceSelector.matchLabels["cluster-ca.vp.io/trust-bundle-target"]
+          value: "true"
+      - equal:
+          path: spec.sources[0].useDefaultCAs
+          value: true
+      - equal:
+          path: spec.sources[1].secret.includeAllKeys
+          value: true
+      - equal:
+          path: spec.target.configMap.key
+          value: ca-bundle.crt
+      - notExists:
+          path: spec.target.namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+  - it: honors custom by-label bundle name and target key
+    set:
+      trustManager.byLabelBundle.enabled: true
+      trustManager.byLabelBundle.name: my-workload-ca
+      trustManager.byLabelBundle.targetKey: bundle.pem
+    asserts:
+      - equal:
+          path: metadata.name
+          value: my-workload-ca
+      - equal:
+          path: spec.target.configMap.key
+          value: bundle.pem

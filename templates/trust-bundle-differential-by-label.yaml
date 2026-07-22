@@ -1,0 +1,27 @@
+{{- if and .Values.trustManager.enabled .Values.trustManager.differentialBundle.enabled .Values.trustManager.differentialBundle.byLabelBundle.enabled }}
+{{- $diff := .Values.trustManager.differentialBundle }}
+{{- $cfg := $diff.byLabelBundle }}
+{{- $bundleName := include "vpProxyCa.differentialByLabelTrustBundleName" . }}
+{{- $targetKey := $cfg.targetKey | default (include "vpProxyCa.differentialTrustBundleTargetKey" .) }}
+{{- if contains "." $targetKey }}
+{{- fail (printf "trustManager.differentialBundle.byLabelBundle.targetKey %q must not contain '.'" $targetKey) }}
+{{- end }}
+apiVersion: trust.cert-manager.io/v1alpha1
+kind: Bundle
+metadata:
+  name: {{ $bundleName }}
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ $cfg.argoCDSyncWave | default $diff.argoCDSyncWave | quote }}
+  labels:
+    app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: trust-bundle-differential-by-label
+spec:
+  sources:
+{{ include "vpProxyCa.differentialTrustBundleSources" . | nindent 4 }}
+  target:
+    configMap:
+      key: {{ $targetKey | quote }}
+    namespaceSelector:
+{{ $cfg.namespaceSelector | toYaml | indent 6 }}
+{{- end }}

@@ -1,0 +1,23 @@
+suite: eso export cronjob
+templates:
+  - eso-export-cronjob.yaml
+release:
+  name: testrel
+tests:
+  - it: renders export CronJob with ose-cli image
+    set:
+      eso:
+        export:
+          enabled: true
+      includeIngressCA: true
+    asserts:
+      - isKind:
+          of: CronJob
+      - matchRegex:
+          path: spec.jobTemplate.spec.template.spec.containers[0].image
+          pattern: "^registry\\.redhat\\.io/openshift4/ose-cli:"
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: INCLUDE_INGRESS_CA
+            value: "true"

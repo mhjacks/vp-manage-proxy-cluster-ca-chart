@@ -1,15 +1,15 @@
 {{/*
-Shared container definition for CronJob and sync Job.
+Hub CronJob container (imperative-container + container securityContext).
 */}}
 {{- define "vpProxyCa.gatherContainer" }}
 {{- $hasAdditional := gt (len .Values.additionalCaBundles) 0 }}
-{{- $spokePush := and (eq .Values.managedClusterCaSource "spokePush") .Values.acm.enabled }}
-- name: gather-ca
+{{- $writeHubExport := eq (include "vpProxyCa.isHubCluster" .) "true" }}
+- name: sync-proxy-ca
   image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
   imagePullPolicy: {{ .Values.image.pullPolicy }}
   command:
     - /bin/bash
-    - /scripts/gather-and-distribute-ca.sh
+    - /scripts/sync-proxy-ca.sh
   env:
     - name: HOME
       value: /tmp
@@ -17,75 +17,40 @@ Shared container definition for CronJob and sync Job.
       value: {{ .Values.configMapName | quote }}
     - name: TARGET_NAMESPACE
       value: {{ .Values.targetNamespace | quote }}
-    - name: MANAGED_CLUSTER_LABEL_SELECTOR
-      value: {{ .Values.managedClusterLabelSelector | quote }}
-    - name: EXCLUDE_CLUSTERS
-      value: {{ .Values.excludeManagedClusters | quote }}
-    - name: MANAGED_CLUSTER_CA_SOURCE
-      value: {{ .Values.managedClusterCaSource | quote }}
-    - name: DISTRIBUTE_TO_SPOKES
-      value: {{ .Values.distributeToSpokes | quote }}
-    - name: MANIFEST_WORK_NAME
-      value: {{ include "vpProxyCa.manifestWorkName" . | quote }}
-    - name: MANIFEST_WORK_PROXY_NAME
-      value: {{ include "vpProxyCa.manifestWorkProxyName" . | quote }}
-    - name: MANIFESTWORK_PATCH_CLUSTER_PROXY
-      value: {{ .Values.manifestWork.patchClusterProxy | toString | quote }}
-    - name: MANIFESTWORK_GRANT_KLUSTERLET_PROXY_RBAC
-      value: {{ .Values.manifestWork.grantKlusterletProxyPatchRBAC | toString | quote }}
-    - name: KLUSTERLET_WORK_SA_NAMESPACE
-      value: {{ .Values.manifestWork.klusterletWorkServiceAccountNamespace | quote }}
-    - name: KLUSTERLET_WORK_SA_NAME
-      value: {{ .Values.manifestWork.klusterletWorkServiceAccountName | quote }}
-    - name: SPOKE_PUSH_HUB_NAMESPACE
-      value: {{ .Values.spokePush.hubNamespace | quote }}
-    - name: SPOKE_PUSH_SPOKE_NAMESPACE
-      value: {{ .Values.spokePush.spokeNamespace | quote }}
-    - name: MANIFEST_WORK_PUSH_AGENT_NAME
-      value: {{ include "vpProxyCa.manifestWorkPushAgentName" . | quote }}
-    - name: SPOKE_PUSH_CRON_SCHEDULE
-      value: {{ .Values.spokePush.schedule | quote }}
-    - name: SPOKE_PUSH_TOKEN_DURATION
-      value: {{ .Values.spokePush.tokenDuration | quote }}
-    - name: SPOKE_PUSH_HUB_API_SERVER
-      value: {{ .Values.spokePush.hubApiServer | quote }}
-    - name: PUSH_AGENT_IMAGE
-      value: {{ printf "%s:%s" .Values.image.repository .Values.image.tag | quote }}
+    - name: WRITE_HUB_EXPORT
+      value: {{ $writeHubExport | toString | quote }}
     - name: INCLUDE_INGRESS_CA
       value: {{ .Values.includeIngressCA | quote }}
     - name: INCLUDE_API_CA
       value: {{ .Values.includeApiCA | quote }}
-    - name: INCLUDE_SYSTEM_TRUST_STORE
-      value: {{ .Values.includeSystemTrustStore | quote }}
-    - name: WAIT_FOR_AVAILABLE
-      value: {{ .Values.waitForManagedClusterAvailable | quote }}
-    - name: CLUSTER_READINESS_MAX_ATTEMPTS
-      value: {{ .Values.clusterReadinessMaxAttempts | toString | quote }}
-    - name: CLUSTER_READINESS_SLEEP_SECONDS
-      value: {{ .Values.clusterReadinessSleepSeconds | toString | quote }}
-    - name: ACM_ENABLED
-      value: {{ .Values.acm.enabled | toString | quote }}
+    - name: TRUST_MANAGER_ENABLED
+      value: {{ .Values.trustManager.enabled | toString | quote }}
+    - name: TRUST_NAMESPACE
+      value: {{ .Values.trustManager.trustNamespace | quote }}
+    - name: TRUST_BUNDLE_NAME
+      value: {{ include "vpProxyCa.trustBundleName" . | quote }}
+    - name: TRUST_TARGET_KEY
+      value: {{ .Values.trustManager.targetKey | quote }}
+    - name: ESO_HUB_EXPORT_SECRET_NAME
+      value: {{ .Values.eso.hubExport.secretName | quote }}
+    - name: ESO_EXPORT_SECRET_KEY
+      value: {{ .Values.eso.export.key | quote }}
+    - name: ESO_LABEL_COMPONENT_KEY
+      value: {{ .Values.trustManager.labels.component | quote }}
+    - name: ESO_LABEL_HUB_EXPORT_VALUE
+      value: {{ .Values.trustManager.labels.hubExport | quote }}
     {{- if $hasAdditional }}
     - name: ADDITIONAL_CA_FILE
       value: /extra/ca.pem
     {{- end }}
-    {{- if $spokePush }}
-    - name: VP_SPOKE_PUSH_INCLUDE_DIR
-      value: /includes/spoke-push
-    {{- end }}
   volumeMounts:
     - name: script
-      mountPath: /scripts/gather-and-distribute-ca.sh
-      subPath: gather-and-distribute-ca.sh
+      mountPath: /scripts/sync-proxy-ca.sh
+      subPath: sync-proxy-ca.sh
       readOnly: true
     {{- if $hasAdditional }}
     - name: additional-ca
       mountPath: /extra
-      readOnly: true
-    {{- end }}
-    {{- if $spokePush }}
-    - name: spoke-push-includes
-      mountPath: /includes/spoke-push
       readOnly: true
     {{- end }}
   resources:
@@ -94,9 +59,71 @@ Shared container definition for CronJob and sync Job.
     {{- toYaml .Values.securityContext | nindent 4 }}
 {{- end }}
 
+{{/*
+One-shot sync Job container (ose-cli by default; omit securityContext unless syncJob.containerSecurityContext set).
+*/}}
+{{- define "vpProxyCa.syncJobContainer" }}
+{{- $hasAdditional := gt (len .Values.additionalCaBundles) 0 }}
+{{- $writeHubExport := eq (include "vpProxyCa.isHubCluster" .) "true" }}
+- name: sync-proxy-ca
+  image: {{ printf "%s:%s" (include "vpProxyCa.syncJobImageRepository" .) (include "vpProxyCa.syncJobImageTag" .) | quote }}
+  imagePullPolicy: {{ include "vpProxyCa.syncJobImagePullPolicy" . }}
+  command:
+    - /bin/bash
+    - /scripts/sync-proxy-ca.sh
+  env:
+    - name: HOME
+      value: /tmp
+    - name: CONFIG_MAP_NAME
+      value: {{ .Values.configMapName | quote }}
+    - name: TARGET_NAMESPACE
+      value: {{ .Values.targetNamespace | quote }}
+    - name: WRITE_HUB_EXPORT
+      value: {{ $writeHubExport | toString | quote }}
+    - name: INCLUDE_INGRESS_CA
+      value: {{ .Values.includeIngressCA | quote }}
+    - name: INCLUDE_API_CA
+      value: {{ .Values.includeApiCA | quote }}
+    - name: TRUST_MANAGER_ENABLED
+      value: {{ .Values.trustManager.enabled | toString | quote }}
+    - name: TRUST_NAMESPACE
+      value: {{ .Values.trustManager.trustNamespace | quote }}
+    - name: TRUST_BUNDLE_NAME
+      value: {{ include "vpProxyCa.trustBundleName" . | quote }}
+    - name: TRUST_TARGET_KEY
+      value: {{ .Values.trustManager.targetKey | quote }}
+    - name: ESO_HUB_EXPORT_SECRET_NAME
+      value: {{ .Values.eso.hubExport.secretName | quote }}
+    - name: ESO_EXPORT_SECRET_KEY
+      value: {{ .Values.eso.export.key | quote }}
+    - name: ESO_LABEL_COMPONENT_KEY
+      value: {{ .Values.trustManager.labels.component | quote }}
+    - name: ESO_LABEL_HUB_EXPORT_VALUE
+      value: {{ .Values.trustManager.labels.hubExport | quote }}
+    {{- if $hasAdditional }}
+    - name: ADDITIONAL_CA_FILE
+      value: /extra/ca.pem
+    {{- end }}
+  volumeMounts:
+    - name: script
+      mountPath: /scripts/sync-proxy-ca.sh
+      subPath: sync-proxy-ca.sh
+      readOnly: true
+    {{- if $hasAdditional }}
+    - name: additional-ca
+      mountPath: /extra
+      readOnly: true
+    {{- end }}
+  resources:
+    {{- toYaml .Values.resources | nindent 4 }}
+{{- with .Values.syncJob.containerSecurityContext }}
+  securityContext:
+    {{- toYaml . | nindent 4 }}
+{{- end }}
+{{- end }}
+
 {{- define "vpProxyCa.gatherVolumes" }}
 {{- $hasAdditional := gt (len .Values.additionalCaBundles) 0 }}
-{{- $spokePush := and (eq .Values.managedClusterCaSource "spokePush") .Values.acm.enabled }}
 - name: script
   configMap:
     name: {{ include "vpProxyCa.fullname" . }}-script
@@ -105,11 +132,5 @@ Shared container definition for CronJob and sync Job.
 - name: additional-ca
   secret:
     secretName: {{ include "vpProxyCa.fullname" . }}-additional-ca
-{{- end }}
-{{- if $spokePush }}
-- name: spoke-push-includes
-  configMap:
-    name: {{ include "vpProxyCa.fullname" . }}-spoke-push-includes
-    defaultMode: 0555
 {{- end }}
 {{- end }}

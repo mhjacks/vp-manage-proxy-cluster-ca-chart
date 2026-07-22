@@ -1,0 +1,18 @@
+{{- if and .Values.trustManager.enabled .Values.trustManager.operator.enabled }}
+apiVersion: operator.openshift.io/v1alpha1
+kind: TrustManager
+metadata:
+  name: {{ .Values.trustManager.operator.name | default "cluster" | quote }}
+  labels:
+    app.kubernetes.io/name: {{ include "vpProxyCa.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: trust-manager
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ .Values.trustManager.operator.argoCDSyncWave | quote }}
+spec:
+  trustManagerConfig:
+    trustNamespace: {{ .Values.trustManager.trustNamespace | quote }}
+    filterExpiredCertificates: {{ .Values.trustManager.operator.filterExpiredCertificates | quote }}
+    defaultCAPackage:
+      policy: {{ .Values.trustManager.operator.defaultCAPackage.policy | quote }}
+{{- end }}

@@ -1,0 +1,209 @@
+suite: trust test
+templates:
+  - trust-test.yaml
+release:
+  name: testrel
+tests:
+  - it: does not render when trustTest.enabled is false
+    set:
+      trustTest:
+        enabled: false
+        namespaces:
+          - config-demo
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: does not render when namespaces list is empty
+    set:
+      trustTest:
+        enabled: true
+        namespaces: []
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders ClusterRole ClusterRoleBinding and per-namespace CronJob
+    set:
+      trustTest:
+        enabled: true
+        namespaces:
+          - config-demo
+          - hello-world
+      trustManager:
+        byLabelBundle:
+          enabled: true
+      configMapName: vp-pattern-proxy-ca-bundle
+    asserts:
+      - hasDocuments:
+          count: 8
+      - isKind:
+          of: ClusterRole
+        documentIndex: 0
+      - isKind:
+          of: ClusterRoleBinding
+        documentIndex: 1
+      - equal:
+          path: metadata.namespace
+          value: config-demo
+        documentIndex: 2
+      - isKind:
+          of: CronJob
+        documentIndex: 4
+      - equal:
+          path: metadata.namespace
+          value: hello-world
+        documentIndex: 5
+      - isKind:
+          of: CronJob
+        documentIndex: 7
+
+  - it: mounts configMapName bundle by default (by-namespace-name)
+    set:
+      trustTest:
+        enabled: true
+        namespaces:
+          - config-demo
+      configMapName: vp-pattern-proxy-ca-bundle
+      trustManager:
+        byLabelBundle:
+          enabled: true
+    documentIndex: 4
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.volumes[1].configMap.name
+          value: vp-pattern-proxy-ca-bundle
+
+  - it: mounts by-label bundle when trustTest.caBundle.configMapName is set
+    set:
+      trustTest:
+        enabled: true
+        namespaces:
+          - config-demo
+        caBundle:
+          configMapName: vp-pattern-proxy-ca-bundle-by-label
+      configMapName: vp-pattern-proxy-ca-bundle
+      trustManager:
+        byLabelBundle:
+          enabled: true
+    documentIndex: 4
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.volumes[1].configMap.name
+          value: vp-pattern-proxy-ca-bundle-by-label
+
+  - it: renders trust-test CronJob with ose-cli image
+    set:
+      trustTest:
+        enabled: true
+        namespaces:
+          - config-demo
+    documentIndex: 4
+    asserts:
+      - matchRegex:
+          path: spec.jobTemplate.spec.template.spec.containers[0].image
+          pattern: "^registry\\.redhat\\.io/openshift4/ose-cli:"
+
+  - it: defaults ingress checks to OpenShift console host template
+    set:
+      trustTest:
+        enabled: true
+        namespaces:
+          - config-demo
+    documentIndex: 4
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CONSOLE_INGRESS_ENABLED
+            value: "true"
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CONSOLE_HOST_TEMPLATE
+            value: "console-openshift-console.%s"
+
+  - it: defaults ADDITIONAL_INGRESS_JSON to empty array
+    set:
+      trustTest:
+        enabled: true
+        namespaces:
+          - config-demo
+    documentIndex: 4
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: ADDITIONAL_INGRESS_JSON
+            value: "[]"
+
+  - it: discovers cluster domains from the ESO import Secret by default
+    set:
+      trustTest:
+        enabled: true
+        namespaces:
+          - config-demo
+      trustManager:
+        trustNamespace: cert-manager
+      eso:
+        externalSecret:
+          targetSecretName: cluster-ca-pushsecrets-import
+    documentIndex: 4
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: DISCOVER_EXPORT_SECRET
+            value: "true"
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: EXPORT_SECRET_NAMESPACE
+            value: cert-manager
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: EXPORT_SECRET_NAME
+            value: cluster-ca-pushsecrets-import
+
+  - it: grants read access to the ESO import Secret
+    set:
+      trustTest:
+        enabled: true
+        namespaces:
+          - config-demo
+      eso:
+        externalSecret:
+          targetSecretName: cluster-ca-pushsecrets-import
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: ["secrets"]
+            resourceNames: ["cluster-ca-pushsecrets-import"]
+            verbs: ["get"]
+
+  - it: merges global and per-namespace additional ingress checks
+    set:
+      trustTest:
+        enabled: true
+        ingress:
+          additional:
+            - name: config-demo
+              hostTemplate: "config-demo-config-demo.%s"
+              path: "/index.html"
+        namespaces:
+          - name: hello-world
+            additionalIngress:
+              - name: hello-world
+                hostTemplate: "hello-world-hello-world.%s"
+                path: "/index.html"
+    documentIndex: 4
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: ADDITIONAL_INGRESS_JSON
+            value: '[{"hostTemplate":"config-demo-config-demo.%s","name":"config-demo","path":"/index.html"},{"hostTemplate":"hello-world-hello-world.%s","name":"hello-world","path":"/index.html"}]'
