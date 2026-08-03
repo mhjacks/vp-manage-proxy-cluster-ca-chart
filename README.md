@@ -417,7 +417,17 @@ ignoreDifferences:
       - .spec.dataFrom[].extract.decodingStrategy
       - .spec.dataFrom[].extract.metadataPolicy
       - .spec.dataFrom[].extract.nullBytePolicy
+  - group: external-secrets.io
+    kind: PushSecret
+    jqPathExpressions:
+      - .spec.data[].conversionStrategy
 ```
+
+### Troubleshooting: Argo CD OutOfSync on PushSecret `cluster-ca-export`
+
+Same pattern as ExternalSecret: live **PushSecret** `data[]` entries get
+`conversionStrategy: None` from the CRD default. Keep Git without that field and ignore it
+(see ignoreDifferences above).
 
 ### Troubleshooting: ExternalSecret `Secret does not exist`
 
@@ -481,8 +491,9 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 
 ### v0.2.1
 
-- Document Argo CD `ignoreDifferences` for ESO CRD-defaulted `dataFrom.extract` fields so
-  ExternalSecret stays Synced on ESO 1.0 and 1.2+ without embedding 1.2-only fields in the chart.
+- Document Argo CD `ignoreDifferences` for ESO CRD-defaulted ExternalSecret `dataFrom.extract`
+  and PushSecret `data[].conversionStrategy` fields so resources stay Synced on ESO 1.0 and 1.2+
+  without embedding version-specific defaults in the chart.
 
 ### v0.2.0 (trust-manager + ESO PushSecret)
 
