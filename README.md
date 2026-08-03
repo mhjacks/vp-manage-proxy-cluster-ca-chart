@@ -401,33 +401,28 @@ oc logs -n vp-proxy-ca-sync job/$(oc get jobs -n vp-proxy-ca-sync -o name | grep
 
 **`apiVersion: external-secrets.io/v1alpha1`** for **PushSecret** is expected (upstream ESO API). **ExternalSecret** uses **`v1`**.
 
-### Troubleshooting: Argo CD OutOfSync on ExternalSecret `dataFrom.extract`
+### Troubleshooting: Argo CD OutOfSync on ExternalSecret / PushSecret
 
-Live objects often gain CRD defaults that are absent from Git (for example `conversionStrategy: Default`,
-`decodingStrategy: None`, `metadataPolicy: None`, and on newer ESO builds `nullBytePolicy: Ignore`).
-This chart intentionally omits those fields so manifests stay valid on **ESO 1.0** (RH `stable-v1`)
-and **1.2+**. Add Application `ignoreDifferences` (with `RespectIgnoreDifferences=true`):
+This chart sets ESO **1.0**-compatible CRD defaults in Git so desired and live match:
+
+| Resource | Field | Value |
+|----------|-------|-------|
+| ExternalSecret `dataFrom.extract` | `conversionStrategy` | `Default` |
+| ExternalSecret `dataFrom.extract` | `decodingStrategy` | `None` |
+| ExternalSecret `dataFrom.extract` | `metadataPolicy` | `None` |
+| PushSecret `data[]` | `conversionStrategy` | `None` |
+
+Do **not** set `nullBytePolicy` in the chart — it is newer than ESO 1.0. If a newer operator
+defaults it on the live object (`Ignore`), add only this Application ignore (with
+`RespectIgnoreDifferences=true`):
 
 ```yaml
 ignoreDifferences:
   - group: external-secrets.io
     kind: ExternalSecret
     jqPathExpressions:
-      - .spec.dataFrom[].extract.conversionStrategy
-      - .spec.dataFrom[].extract.decodingStrategy
-      - .spec.dataFrom[].extract.metadataPolicy
       - .spec.dataFrom[].extract.nullBytePolicy
-  - group: external-secrets.io
-    kind: PushSecret
-    jqPathExpressions:
-      - .spec.data[].conversionStrategy
 ```
-
-### Troubleshooting: Argo CD OutOfSync on PushSecret `cluster-ca-export`
-
-Same pattern as ExternalSecret: live **PushSecret** `data[]` entries get
-`conversionStrategy: None` from the CRD default. Keep Git without that field and ignore it
-(see ignoreDifferences above).
 
 ### Troubleshooting: ExternalSecret `Secret does not exist`
 
@@ -491,9 +486,9 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 
 ### v0.2.1
 
-- Document Argo CD `ignoreDifferences` for ESO CRD-defaulted ExternalSecret `dataFrom.extract`
-  and PushSecret `data[].conversionStrategy` fields so resources stay Synced on ESO 1.0 and 1.2+
-  without embedding version-specific defaults in the chart.
+- Set ESO 1.0-compatible ExternalSecret extract and PushSecret `conversionStrategy` defaults in
+  Git so Argo CD stays Synced without broad ignoreDifferences. Document ignoring only
+  `nullBytePolicy` when a newer ESO defaults it on the live object.
 
 ### v0.2.0 (trust-manager + ESO PushSecret)
 
