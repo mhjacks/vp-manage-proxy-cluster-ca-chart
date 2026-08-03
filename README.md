@@ -1,7 +1,7 @@
 
 # vp-manage-proxy-cluster-ca
 
-![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
+![Version: 0.2.1](https://img.shields.io/badge/Version-0.2.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
 
 OpenShift chart for cluster-wide Proxy trusted CA bundles. Each cluster exports CAs via ESO PushSecret to Vault; ExternalSecret and trust-manager Bundle merge labeled Secrets into openshift-config. Hub CronJob writes hub-export material and patches Proxy/cluster. No ACM or ManifestWork required.
 
@@ -401,6 +401,24 @@ oc logs -n vp-proxy-ca-sync job/$(oc get jobs -n vp-proxy-ca-sync -o name | grep
 
 **`apiVersion: external-secrets.io/v1alpha1`** for **PushSecret** is expected (upstream ESO API). **ExternalSecret** uses **`v1`**.
 
+### Troubleshooting: Argo CD OutOfSync on ExternalSecret `dataFrom.extract`
+
+Live objects often gain CRD defaults that are absent from Git (for example `conversionStrategy: Default`,
+`decodingStrategy: None`, `metadataPolicy: None`, and on newer ESO builds `nullBytePolicy: Ignore`).
+This chart intentionally omits those fields so manifests stay valid on **ESO 1.0** (RH `stable-v1`)
+and **1.2+**. Add Application `ignoreDifferences` (with `RespectIgnoreDifferences=true`):
+
+```yaml
+ignoreDifferences:
+  - group: external-secrets.io
+    kind: ExternalSecret
+    jqPathExpressions:
+      - .spec.dataFrom[].extract.conversionStrategy
+      - .spec.dataFrom[].extract.decodingStrategy
+      - .spec.dataFrom[].extract.metadataPolicy
+      - .spec.dataFrom[].extract.nullBytePolicy
+```
+
 ### Troubleshooting: ExternalSecret `Secret does not exist`
 
 ```text
@@ -460,6 +478,11 @@ If **vault-backend** stays **NotReady**, the root cause is in platform Vault/ESO
 - OpenShift proxy: [Configuring the cluster-wide proxy](https://docs.openshift.com/container-platform/latest/networking/configuring-a-custom-pki.html#nw-proxy-configure-cluster_configuring-a-custom-pki).
 
 ## Notable changes
+
+### v0.2.1
+
+- Document Argo CD `ignoreDifferences` for ESO CRD-defaulted `dataFrom.extract` fields so
+  ExternalSecret stays Synced on ESO 1.0 and 1.2+ without embedding 1.2-only fields in the chart.
 
 ### v0.2.0 (trust-manager + ESO PushSecret)
 

@@ -5,7 +5,7 @@ description: >-
   to Vault; ExternalSecret and trust-manager Bundle merge labeled Secrets into openshift-config. Hub CronJob
   writes hub-export material and patches Proxy/cluster. No ACM or ManifestWork required.
 type: application
-version: 0.2.0
+version: 0.2.1
 keywords:
   - openshift
   - proxy
